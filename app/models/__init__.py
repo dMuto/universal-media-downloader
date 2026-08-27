@@ -7,6 +7,7 @@ from .download import (
 )
 from .format import FormatInfo, MediaType
 from .media import MediaInfo
+from .selection import FormatSelection
 
 __all__ = [
     "DownloadOptions",
@@ -15,6 +16,7 @@ __all__ = [
     "DownloadStatus",
     "DownloadType",
     "FormatInfo",
-    "MediaType",
+    "FormatSelection",
     "MediaInfo",
+    "MediaType",
 ]
