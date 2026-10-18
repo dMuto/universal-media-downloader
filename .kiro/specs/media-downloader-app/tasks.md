@@ -209,7 +209,7 @@ As subtarefas de verificação manual/estrutural (não automatizáveis via pytes
 
 ### Fase 2 — Implementação para fazer os testes passarem (GREEN), camada por camada
 
-- [ ] 8. Estender `FFmpegService` com `convert_to_mp3`
+- [x] 8. Estender `FFmpegService` com `convert_to_mp3`
   - Implementar `SUPPORTED_MP3_BITRATES` e `FFmpegService.convert_to_mp3(audio_path, output_path, bitrate)` em `app/core/ffmpeg_service.py`
   - Validar o bitrate contra `SUPPORTED_MP3_BITRATES` antes de qualquer chamada a `subprocess.run`
   - Reaproveitar `_validate_input_file`, `is_available` e a criação do diretório de saída já usados por `merge`
@@ -217,118 +217,118 @@ As subtarefas de verificação manual/estrutural (não automatizáveis via pytes
   - Faz passar: tarefa 3.1 (`tests/core/test_ffmpeg_service.py`)
   - _Requirements: 6.1, 6.2, 6.3_
 
-- [ ] 9. Estender `Downloader` com `progress_hook`, `cancel_event`, sanitização unificada e integração de MP3
+- [x] 9. Estender `Downloader` com `progress_hook`, `cancel_event`, sanitização unificada e integração de MP3
   - [x] 9.1 Adicionar parâmetro opcional `progress_hook: Callable[[DownloadProgress], None] | None` a `download()`, adaptando o dicionário de `progress_hooks` do `yt-dlp` para `DownloadProgress`, preenchendo apenas os campos presentes
     - Contribui para fazer passar: tarefa 5.6 (`Property 12`), a ser verificada na Fase 2 de Services (tarefa 15)
     - _Requirements: 7.1, 7.2, 7.5_
 
-  - [ ] 9.2 Adicionar `cancel_event: threading.Event | None` cooperativo a `download()`, `_download_single_format`, `_download_to_directory` e `_download_and_merge`
+  - [x] 9.2 Adicionar `cancel_event: threading.Event | None` cooperativo a `download()`, `_download_single_format`, `_download_to_directory` e `_download_and_merge`
     - Verificar o evento antes de iniciar cada stream, dentro do `progress_hook` do `yt-dlp` e antes de iniciar o merge
     - Remover arquivos temporários/parciais da operação quando o cancelamento é confirmado, sem sobrescrever nenhum arquivo final no destino
     - Contribui para fazer passar: tarefa 5.8 (`Property 14`), a ser verificada na Fase 2 de Services (tarefa 15)
     - _Requirements: 8.2, 8.4_
 
-  - [ ] 9.3 Unificar sanitização de nome de arquivo no caminho de formato único
+  - [x] 9.3 Unificar sanitização de nome de arquivo no caminho de formato único
     - Aplicar `_sanitize_filename` também em `_download_single_format`, igual ao já feito em `_download_and_merge`
     - Mantém passando: tarefa 2.12 (download de formato único, requisito 4.1); `_sanitize_filename` em si já é coberto pela tarefa 2.10
     - _Requirements: 11.1, 11.2_
 
-  - [ ] 9.4 Integrar `convert_to_mp3` ao fluxo de download de áudio
+  - [x] 9.4 Integrar `convert_to_mp3` ao fluxo de download de áudio
     - Quando `options.download_type == DownloadType.AUDIO` e `options.audio_bitrate is not None`, invocar `FFmpegService.convert_to_mp3` sobre o áudio baixado antes de retornar o `DownloadResult`, removendo o arquivo intermediário não convertido
     - Faz passar: tarefa 3.3 (`tests/core/test_downloader.py`)
     - _Requirements: 6.1, 6.4_
 
-  - [ ] 9.5 Garantir que falhas internas nunca escapem como exceções não tratadas em `download()`
+  - [x] 9.5 Garantir que falhas internas nunca escapem como exceções não tratadas em `download()`
     - Capturar `yt_dlp.utils.DownloadError`, `FFmpegError`, `FormatSelectionError`, `OSError` e `Exception` genérica, retornando sempre `DownloadResult(success=False, error_message=...)`
     - Faz passar: tarefa 3.2 (`Property 11`, nível `Downloader`)
     - _Requirements: 4.7, 6.5_
 
-- [ ] 10. Checkpoint — revisar extensões do Core
+- [x] 10. Checkpoint — revisar extensões do Core
   - Ensure all tests pass (Seções 2 e 3 completas), ask the user if questions arise.
 
-- [ ] 11. Criar modelos de suporte `AppConfig` e `HistoryEntry`
-  - [ ] 11.1 Criar `app/models/config.py` com `AppConfig` (`default_destination`, `default_download_type`, `preferred_resolution`, `default_audio_bitrate`, `ffmpeg_path`, `theme`) como `dataclass(frozen=True)` com valores padrão
+- [x] 11. Criar modelos de suporte `AppConfig` e `HistoryEntry`
+  - [x] 11.1 Criar `app/models/config.py` com `AppConfig` (`default_destination`, `default_download_type`, `preferred_resolution`, `default_audio_bitrate`, `ffmpeg_path`, `theme`) como `dataclass(frozen=True)` com valores padrão
     - Faz passar: tarefa 4.1 (`tests/models/test_config.py`)
     - _Requirements: 13.1, 13.2_
 
-  - [ ] 11.2 Criar `app/models/history.py` com `HistoryEntry` (`url`, `title`, `download_type`, `status`, `file_path`, `timestamp`, `error_message`) e propriedade calculada `file_exists`
+  - [x] 11.2 Criar `app/models/history.py` com `HistoryEntry` (`url`, `title`, `download_type`, `status`, `file_path`, `timestamp`, `error_message`) e propriedade calculada `file_exists`
     - Faz passar: tarefa 4.2 (`tests/models/test_history.py`)
     - _Requirements: 14.1, 14.3_
 
-- [ ] 12. Criar `ConfigService`
+- [x] 12. Criar `ConfigService`
   - Implementar `app/services/config_service.py` com `ConfigService.load()` e `ConfigService.save(config)`, persistindo `AppConfig` em JSON no diretório de configuração do usuário
   - `load()` SHALL retornar `AppConfig` com valores padrão quando o arquivo não existir, estiver corrompido ou for ilegível, sem lançar exceção
   - Faz passar: tarefas 5.1 e 5.2 (`tests/services/test_config_service.py`)
   - _Requirements: 13.1, 13.2, 13.4_
 
-- [ ] 13. Criar `HistoryService`
+- [x] 13. Criar `HistoryService`
   - Implementar `app/services/history_service.py` com `HistoryService.add_entry(entry)` e `HistoryService.list_entries()`, persistindo uma lista de `HistoryEntry` em JSON no diretório de dados do usuário
   - `list_entries()` SHALL retornar as entradas em ordem cronológica de inserção
   - Faz passar: tarefas 5.3 e 5.4 (`tests/services/test_history_service.py`)
   - _Requirements: 14.1, 14.2, 14.3_
 
-- [ ] 14. Checkpoint — revisar Models novos e Services base (`ConfigService`, `HistoryService`)
+- [x] 14. Checkpoint — revisar Models novos e Services base (`ConfigService`, `HistoryService`)
   - Ensure all tests pass (tarefas 4.1, 4.2, 5.1 a 5.4), ask the user if questions arise.
 
-- [ ] 15. Criar `DownloadService`: composição, orquestração e background
-  - [ ] 15.1 Implementar `DownloadService.__init__` compondo `Downloader`, `FormatSelector`, `FFmpegService`, `ConfigService` e `HistoryService`, sem exigir que a GUI conheça essas classes
+- [x] 15. Criar `DownloadService`: composição, orquestração e background
+  - [x] 15.1 Implementar `DownloadService.__init__` compondo `Downloader`, `FormatSelector`, `FFmpegService`, `ConfigService` e `HistoryService`, sem exigir que a GUI conheça essas classes
     - _Requirements: 10.1, 10.2_
 
-  - [ ] 15.2 Implementar `analyze(url, on_complete)` retornando `DownloadHandle` e executando a análise em uma worker thread via `ThreadPoolExecutor`
+  - [x] 15.2 Implementar `analyze(url, on_complete)` retornando `DownloadHandle` e executando a análise em uma worker thread via `ThreadPoolExecutor`
     - Contribui para fazer passar: parte de 5.10 (execução fora da thread chamadora, 9.1)
     - _Requirements: 9.1, 10.1_
 
-  - [ ] 15.3 Implementar `start_download(media, options, on_progress, on_complete)`
+  - [x] 15.3 Implementar `start_download(media, options, on_progress, on_complete)`
     - Selecionar formato(s) via `FormatSelector` (sem reimplementar sua lógica), disparar o download em background com `operation_id` próprio e `cancel_event` associado, publicando `DownloadProgress` por fila/estrutura compartilhada e via `on_progress`
     - Emitir estados na ordem `PENDING → ANALYZING/DOWNLOADING → PROCESSING → estado terminal`
     - Faz passar: tarefas 5.6 e 5.7 (`Property 12` e `Property 13`)
     - _Requirements: 7.1, 7.3, 7.4, 10.3_
 
-  - [ ] 15.4 Implementar `cancel(operation_id)`
+  - [x] 15.4 Implementar `cancel(operation_id)`
     - Sinalizar o `cancel_event` da operação; ser no-op silencioso quando a operação já está em estado terminal (`COMPLETED`, `FAILED`, `CANCELLED`)
     - Faz passar: tarefa 5.8 (`Property 14`); contribui para parte de 5.10 (8.1, 8.5)
     - _Requirements: 8.1, 8.3, 8.5_
 
-  - [ ] 15.5 Capturar exceções não tratadas dentro do worker e traduzi-las em `DownloadProgress`/`DownloadResult` com estado `FAILED`, sem propagar e sem expor exceções de `yt_dlp`/`subprocess`/`threading` à GUI
+  - [x] 15.5 Capturar exceções não tratadas dentro do worker e traduzi-las em `DownloadProgress`/`DownloadResult` com estado `FAILED`, sem propagar e sem expor exceções de `yt_dlp`/`subprocess`/`threading` à GUI
     - Faz passar: tarefa 5.5 (`Property 11`, nível `DownloadService`); contribui para parte de 5.10 (10.4)
     - _Requirements: 9.4, 10.4_
 
-  - [ ] 15.6 Aplicar valores padrão de `ConfigService` quando não informados nas `DownloadOptions` (destino, tipo de download, bitrate de áudio) antes de chamar `Downloader.download`
+  - [x] 15.6 Aplicar valores padrão de `ConfigService` quando não informados nas `DownloadOptions` (destino, tipo de download, bitrate de áudio) antes de chamar `Downloader.download`
     - Contribui para fazer passar: parte de 5.10 (bitrate padrão aplicado, 6.6)
     - _Requirements: 6.6, 13.1_
 
-  - [ ] 15.7 Registrar uma `HistoryEntry` via `HistoryService.add_entry` ao concluir, falhar ou cancelar cada operação de download/merge/conversão
+  - [x] 15.7 Registrar uma `HistoryEntry` via `HistoryService.add_entry` ao concluir, falhar ou cancelar cada operação de download/merge/conversão
     - Faz passar: tarefa 5.9 (`Property 16`, integração com `DownloadService`)
     - _Requirements: 14.1_
 
-  - [ ]* 15.8 Verificação manual/estrutural (não automatizável como teste unitário): revisar por leitura de código que `DownloadService` expõe análise, download, Merge, Conversão_Para_MP3 e Cancelamento como API única, e que compõe `Downloader`/`FormatSelector`/`FFmpegService` internamente sem exigir que a GUI os conheça
+  - [x]* 15.8 Verificação manual/estrutural (não automatizável como teste unitário): revisar por leitura de código que `DownloadService` expõe análise, download, Merge, Conversão_Para_MP3 e Cancelamento como API única, e que compõe `Downloader`/`FormatSelector`/`FFmpegService` internamente sem exigir que a GUI os conheça
     - _Requirements: 10.1, 10.2, 10.3_
 
-- [ ] 16. Checkpoint — revisar camada de Services completa
+- [x] 16. Checkpoint — revisar camada de Services completa
   - Ensure all tests pass (tarefas 5.5 a 5.10 integralmente), ask the user if questions arise.
 
-- [ ] 17. Criar GUI CustomTkinter consumindo exclusivamente `app/services` e `app/models`
-  - [ ] 17.1 Implementar `MainWindow` com o laço `.after(ms, callback)` que drena progresso/resultados das operações ativas periodicamente na thread principal
+- [x] 17. Criar GUI CustomTkinter consumindo exclusivamente `app/services` e `app/models`
+  - [x] 17.1 Implementar `MainWindow` com o laço `.after(ms, callback)` que drena progresso/resultados das operações ativas periodicamente na thread principal
     - _Requirements: 9.2, 9.3_
 
-  - [ ] 17.2 Implementar `DownloadPanel`
+  - [x] 17.2 Implementar `DownloadPanel`
     - Campo de URL, botão "Analisar" (chama `DownloadService.analyze`), exibição de título/uploader/thumbnail quando disponíveis, seletor de Tipo_De_Download, altura máxima (vídeo) ou Bitrate_De_Áudio (áudio) e diretório de destino, botão "Baixar" e botão "Cancelar"
     - _Requirements: 12.2, 12.3, 12.4, 12.6_
 
-  - [ ] 17.3 Implementar `ProgressWidget`
+  - [x] 17.3 Implementar `ProgressWidget`
     - Barra de progresso e rótulo de estado atualizados a partir de `DownloadProgress` (percentual e `Estado_Do_Download`)
     - _Requirements: 12.5_
 
-  - [ ] 17.4 Implementar `HistoryPanel`
+  - [x] 17.4 Implementar `HistoryPanel`
     - Lista as entradas de `HistoryService.list_entries()`, indicando visualmente quando o arquivo referenciado não existe mais, sem sinalizar erro de execução
     - _Requirements: 14.3_
 
-  - [ ] 17.5 Exibir mensagens de erro no `DownloadPanel`
+  - [x] 17.5 Exibir mensagens de erro no `DownloadPanel`
     - Ao receber falha do `DownloadService`, exibir apenas a string `error_message` ao usuário, nunca stack traces ou exceções internas
     - Faz passar: parte de tarefa 6.1 (12.7)
     - _Requirements: 12.7_
 
-  - [ ] 17.6 Revisar imports da GUI
+  - [x] 17.6 Revisar imports da GUI
     - Garantir que nenhum módulo em `app/gui` importa `Downloader`, `FormatSelector` ou `FFmpegService` diretamente; apenas `app.services` e `app.models`
     - _Requirements: 12.8_
 
@@ -337,10 +337,10 @@ As subtarefas de verificação manual/estrutural (não automatizáveis via pytes
 
   - Faz passar: tarefas 6.1 e 6.2 (`tests/gui/test_download_panel.py`, `tests/gui/test_history_panel.py`)
 
-- [ ] 18. Checkpoint — revisar GUI e fluxo completo
+- [x] 18. Checkpoint — revisar GUI e fluxo completo
   - Ensure all tests pass (tarefas 6.1 e 6.2), ask the user if questions arise.
 
-- [ ] 19. Preparar empacotamento com PyInstaller
+- [x] 19. Preparar empacotamento com PyInstaller
   - Criar o arquivo de build (`.spec` ou script equivalente) incluindo `app/` (GUI, Core, Services, Models) e as dependências necessárias (CustomTkinter, yt-dlp), sem uso de Docker ou containerização em nenhuma etapa
   - _Requirements: 16.1, 16.2, 16.3, 16.5_
 
@@ -350,12 +350,12 @@ As subtarefas de verificação manual/estrutural (não automatizáveis via pytes
   - [ ]* 19.2 Verificação manual (smoke test, não automatizável via pytest): em ambiente sem FFmpeg no PATH e sem `ffmpeg_path` configurado, confirmar que o aplicativo empacotado informa ao usuário que o FFmpeg é necessário para Merge/Conversão_Para_MP3, em vez de falhar silenciosamente
     - _Requirements: 16.4_
 
-- [ ] 20. Revisão final de cobertura de testes e execução completa da suíte
+- [x] 20. Revisão final de cobertura de testes e execução completa da suíte
   - Confirmar, por inspeção dos comentários `# Feature: media-downloader-app, Property N: ...` em `tests/`, que as 16 Correctness Properties do design.md possuem ao menos um teste de propriedade associado
   - Confirmar que todos os Requisitos 1 a 16 (incluindo os casos de borda citados na Testing Strategy) possuem ao menos um teste automatizado ou, quando explicitamente não automatizável, um item de verificação manual/estrutural correspondente
   - _Requirements: 15.1, 15.2, 15.3, 15.4, 15.5_
 
-  - [ ] 20.1 Executar a suíte de testes completa (`pytest`) e garantir que todos os testes passam (GREEN final)
+  - [x] 20.1 Executar a suíte de testes completa (`pytest`) e garantir que todos os testes passam (GREEN final)
     - Ensure all tests pass, ask the user if questions arise.
     - _Requirements: 15.1, 15.2, 15.3, 15.4, 15.5_
 
