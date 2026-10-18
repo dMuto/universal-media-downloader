@@ -5,12 +5,12 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from app.models.history import HistoryEntry
-from app.services.history_service import HistoryService
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from app.models import DownloadStatus, DownloadType
+from app.models.history import HistoryEntry
+from app.services.history_service import HistoryService
 
 _url_strategy = st.text(min_size=1, max_size=50).map(
     lambda suffix: f"https://example.com/{suffix}"
@@ -56,7 +56,13 @@ def test_added_entry_is_retrievable_with_matching_fields(
     error_message: str | None,
 ) -> None:
     # Feature: media-downloader-app, Property 16: Toda operação finalizada gera exatamente uma entrada de histórico consistente
+    # `tmp_path` is a function-scoped fixture shared across every Hypothesis
+    # example (and shrink attempt) within this test invocation, so the
+    # history file must be reset at the start of each example to keep
+    # them isolated from one another.
     history_path = tmp_path / "history.json"
+    if history_path.exists():
+        history_path.unlink()
 
     file_path: Path | None
     if file_path_choice == "none":

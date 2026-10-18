@@ -9,13 +9,13 @@ expected to fail with an `ImportError` until task 11.1 (Phase 2) creates the
 import json
 from pathlib import Path
 
-from app.models.config import AppConfig
-from app.services.config_service import ConfigService
-from hypothesis import given, settings
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from app.core.ffmpeg_service import FFmpegService
+from app.models.config import AppConfig
 from app.models.download import DownloadType
+from app.services.config_service import ConfigService
 
 
 def _app_configs() -> st.SearchStrategy[AppConfig]:
@@ -63,7 +63,10 @@ def _app_configs() -> st.SearchStrategy[AppConfig]:
 
 
 @given(config=_app_configs())
-@settings(max_examples=100)
+@settings(
+    max_examples=100,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 def test_config_round_trip(tmp_path: Path, config: AppConfig) -> None:
     """`ConfigService.save` followed by `.load` SHALL return an equal `AppConfig`.
 
@@ -107,7 +110,10 @@ def test_config_round_trip(tmp_path: Path, config: AppConfig) -> None:
         st.binary(min_size=0, max_size=50),
     )
 )
-@settings(max_examples=100)
+@settings(
+    max_examples=100,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 def test_config_load_tolerates_corruption(tmp_path: Path, content) -> None:
     """`ConfigService.load` SHALL return a default `AppConfig` on invalid content.
 

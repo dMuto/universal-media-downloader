@@ -19,7 +19,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import yt_dlp
-from app.services.download_service import DownloadHandle, DownloadService
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
@@ -27,13 +26,18 @@ from app.core.downloader import Downloader
 from app.core.ffmpeg_service import FFmpegError, FFmpegService
 from app.core.format_selector import FormatSelectionError, FormatSelector
 from app.models import (
+    AppConfig,
     DownloadOptions,
     DownloadProgress,
     DownloadResult,
     DownloadStatus,
     DownloadType,
     FormatSelection,
+    HistoryEntry,
 )
+from app.services.config_service import ConfigService
+from app.services.download_service import DownloadHandle, DownloadService
+from app.services.history_service import HistoryService
 
 # ---------------------------------------------------------------------------
 # Shared fakes/factories for `DownloadService` tests (tasks 5.5 - 5.10).
