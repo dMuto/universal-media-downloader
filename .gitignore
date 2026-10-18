@@ -29,8 +29,9 @@ MANIFEST
 # PyInstaller
 #   Usually these files are written by a python script from a template
 #   before PyInstaller builds the exe, so as to inject date/other infos into it.
+#   O .spec de build deste projeto (tarefa 19) sera versionado propositalmente;
+#   build/ e dist/ acima ja cobrem os artefatos gerados, por isso nao ignoramos *.spec.
 *.manifest
-*.spec
 
 # Installer logs
 pip-log.txt
@@ -218,6 +219,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Kiro IDE: metadados locais de execucao, nao sao conteudo do projeto.
+# requirements.md/design.md/tasks.md/.config.kiro de cada spec continuam versionados.
+.kiro/specs/**/tasks.meta.json
+.kiro/execution-profiles.json
 
 # OS
 Thumbs.db
