@@ -8,11 +8,13 @@ from typing import Any
 import yt_dlp
 
 from app.core.ffmpeg_service import FFmpegError, FFmpegService
+from app.core.format_selector import FormatSelectionError
 from app.models import (
     DownloadOptions,
     DownloadProgress,
     DownloadResult,
     DownloadStatus,
+    DownloadType,
     FormatInfo,
     FormatSelection,
     MediaInfo,
@@ -26,6 +28,16 @@ class MediaAnalysisError(Exception):
 
 class DownloadError(Exception):
     """Raised when a media download cannot be completed."""
+
+
+class _DownloadCancelled(Exception):
+    """
+    Internal control-flow exception used to cooperatively interrupt a
+    download when `cancel_event` is set.
+
+    This never escapes `Downloader.download()`: it is always caught and
+    translated into a `DownloadResult(success=False, ...)`.
+    """
 
 
 class Downloader:
@@ -79,6 +91,7 @@ class Downloader:
         options: DownloadOptions,
         selection: FormatSelection,
         progress_hook: Callable[[DownloadProgress], None] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> DownloadResult:
         """
         Download the selected formats using yt-dlp.
@@ -91,6 +104,15 @@ class Downloader:
         dictionaries as the download advances. Only the fields present
         in the underlying yt-dlp dictionary are populated; fields that
         are absent are left as `None` rather than assuming a value.
+
+        When `cancel_event` is provided, it is checked cooperatively at
+        safe points (before starting each stream download, from within
+        the yt-dlp progress hook, and before starting the merge). Once a
+        cancellation is confirmed, no final file is written/overwritten
+        in the destination directory from partial data, any temporary or
+        partial files created by the operation are removed, and a
+        `DownloadResult(success=False, ...)` describing the cancellation
+        is returned instead of raising.
         """
         if not options.url or not options.url.strip():
             return DownloadResult(
@@ -125,6 +147,7 @@ class Downloader:
                     selection=selection,
                     destination=destination,
                     progress_hook=progress_hook,
+                    cancel_event=cancel_event,
                 )
 
             selected_format = selection.video_format or selection.audio_format
@@ -140,12 +163,28 @@ class Downloader:
                 format_id=selected_format.format_id,
                 destination=destination,
                 progress_hook=progress_hook,
+                cancel_event=cancel_event,
             )
+
+            if (
+                options.download_type == DownloadType.AUDIO
+                and options.audio_bitrate is not None
+            ):
+                file_path = self._convert_to_mp3(
+                    audio_path=file_path,
+                    bitrate=options.audio_bitrate,
+                )
 
             return DownloadResult(
                 success=True,
                 file_path=file_path,
                 file_size=self._get_file_size(file_path),
+            )
+
+        except _DownloadCancelled:
+            return DownloadResult(
+                success=False,
+                error_message="Operação cancelada.",
             )
 
         except yt_dlp.utils.DownloadError as exc:
@@ -158,6 +197,12 @@ class Downloader:
             return DownloadResult(
                 success=False,
                 error_message=f"Erro no FFmpeg: {exc}",
+            )
+
+        except FormatSelectionError as exc:
+            return DownloadResult(
+                success=False,
+                error_message=f"Erro na seleção de formato: {exc}",
             )
 
         except OSError as exc:
@@ -278,20 +323,40 @@ class Downloader:
 
     @staticmethod
     def _make_yt_dlp_progress_hook(
-        progress_hook: Callable[[DownloadProgress], None],
+        progress_hook: Callable[[DownloadProgress], None] | None,
+        cancel_event: threading.Event | None = None,
     ) -> Callable[[dict[str, Any]], None]:
         """
         Build a yt-dlp-compatible progress hook that adapts yt-dlp's raw
         progress dictionary into a DownloadProgress before delegating to
         the caller-supplied progress_hook.
+
+        When `cancel_event` is set, the hook raises `_DownloadCancelled`
+        instead of delegating, which interrupts yt-dlp's in-progress
+        download cleanly (the exception propagates up through
+        `extract_info`/`download` without yt-dlp swallowing it, since
+        yt-dlp's own progress hook invocation does not catch arbitrary
+        exceptions raised by caller-supplied hooks).
         """
 
         def yt_dlp_hook(raw_progress: dict[str, Any]) -> None:
-            progress_hook(
-                Downloader._build_download_progress(raw_progress),
-            )
+            if cancel_event is not None and cancel_event.is_set():
+                raise _DownloadCancelled()
+
+            if progress_hook is not None:
+                progress_hook(
+                    Downloader._build_download_progress(raw_progress),
+                )
 
         return yt_dlp_hook
+
+    @staticmethod
+    def _check_cancelled(
+        cancel_event: threading.Event | None,
+    ) -> None:
+        """Raise `_DownloadCancelled` if `cancel_event` has been set."""
+        if cancel_event is not None and cancel_event.is_set():
+            raise _DownloadCancelled()
 
     @staticmethod
     def _build_download_progress(
@@ -373,8 +438,11 @@ class Downloader:
         format_id: str,
         destination: Path,
         progress_hook: Callable[[DownloadProgress], None] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> Path:
         """Download a single yt-dlp format."""
+        self._check_cancelled(cancel_event)
+
         ydl_options = {
             "format": format_id,
             "outtmpl": str(destination / "%(title)s.%(ext)s"),
@@ -383,26 +451,85 @@ class Downloader:
             "no_warnings": True,
         }
 
-        if progress_hook is not None:
+        if progress_hook is not None or cancel_event is not None:
             ydl_options["progress_hooks"] = [
-                self._make_yt_dlp_progress_hook(progress_hook),
+                self._make_yt_dlp_progress_hook(
+                    progress_hook,
+                    cancel_event=cancel_event,
+                ),
             ]
 
-        with yt_dlp.YoutubeDL(ydl_options) as ydl:
-            info = ydl.extract_info(
-                url.strip(),
-                download=True,
-            )
+        try:
+            with yt_dlp.YoutubeDL(ydl_options) as ydl:
+                info = ydl.extract_info(
+                    url.strip(),
+                    download=True,
+                )
 
-            file_path = self._get_downloaded_file_path(
-                ydl,
-                info,
-            )
+                file_path = self._get_downloaded_file_path(
+                    ydl,
+                    info,
+                )
+
+        except _DownloadCancelled:
+            self._remove_partial_files(destination)
+            raise
 
         if file_path is None or not file_path.is_file():
             raise OSError("Não foi possível determinar o arquivo baixado.")
 
-        return file_path
+        return self._sanitize_downloaded_file_name(file_path)
+
+    def _convert_to_mp3(
+        self,
+        audio_path: Path,
+        bitrate: int,
+    ) -> Path:
+        """
+        Convert the downloaded audio file to MP3 at the requested bitrate,
+        removing the intermediate (unconverted) audio file afterwards.
+
+        The resulting MP3 file is written alongside the intermediate file,
+        reusing its stem and swapping the extension to `.mp3`.
+        """
+        if self._ffmpeg_service is None:
+            self._ffmpeg_service = FFmpegService()
+
+        output_path = audio_path.with_suffix(".mp3")
+
+        final_path = self._ffmpeg_service.convert_to_mp3(
+            audio_path=audio_path,
+            output_path=output_path,
+            bitrate=bitrate,
+        )
+
+        if final_path != audio_path:
+            audio_path.unlink(missing_ok=True)
+
+        return final_path
+
+    @staticmethod
+    def _sanitize_downloaded_file_name(
+        file_path: Path,
+    ) -> Path:
+        """
+        Rename a downloaded file so its final name is sanitized, mirroring
+        the sanitization already applied to the merge path's output name.
+
+        The stem (filename without extension) is sanitized; the extension
+        and parent directory are preserved. When the sanitized stem is
+        identical to the original one, the file is left untouched.
+        """
+        sanitized_stem = Downloader._sanitize_filename(file_path.stem)
+
+        if sanitized_stem == file_path.stem:
+            return file_path
+
+        sanitized_path = file_path.with_name(f"{sanitized_stem}{file_path.suffix}")
+
+        file_path.replace(sanitized_path)
+
+        return sanitized_path
 
     def _download_and_merge(
         self,
@@ -410,6 +537,7 @@ class Downloader:
         selection: FormatSelection,
         destination: Path,
         progress_hook: Callable[[DownloadProgress], None] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> DownloadResult:
         """Download separate video/audio streams and merge them."""
         if selection.video_format is None:
@@ -428,11 +556,17 @@ class Downloader:
         video_format = selection.video_format
         audio_format = selection.audio_format
 
+        # `TemporaryDirectory` removes `temp_directory` (and everything
+        # inside it) on exit regardless of whether the block completes
+        # normally or raises, so any partial video/audio streams created
+        # before a confirmed cancellation are cleaned up automatically.
         with TemporaryDirectory(
             prefix="umd_",
             dir=destination,
         ) as temp_directory:
             temp_path = Path(temp_directory)
+
+            self._check_cancelled(cancel_event)
 
             video_path = self._download_to_directory(
                 url=options.url,
@@ -440,7 +574,10 @@ class Downloader:
                 directory=temp_path,
                 prefix="video",
                 progress_hook=progress_hook,
+                cancel_event=cancel_event,
             )
+
+            self._check_cancelled(cancel_event)
 
             audio_path = self._download_to_directory(
                 url=options.url,
@@ -448,7 +585,10 @@ class Downloader:
                 directory=temp_path,
                 prefix="audio",
                 progress_hook=progress_hook,
+                cancel_event=cancel_event,
             )
+
+            self._check_cancelled(cancel_event)
 
             output_extension = self._get_merge_extension(
                 audio_codec=audio_format.audio_codec,
@@ -480,8 +620,11 @@ class Downloader:
         directory: Path,
         prefix: str,
         progress_hook: Callable[[DownloadProgress], None] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> Path:
         """Download one selected stream into a temporary directory."""
+        self._check_cancelled(cancel_event)
+
         ydl_options = {
             "format": format_id,
             "outtmpl": str(directory / f"{prefix}_%(title)s.%(ext)s"),
@@ -490,9 +633,12 @@ class Downloader:
             "no_warnings": True,
         }
 
-        if progress_hook is not None:
+        if progress_hook is not None or cancel_event is not None:
             ydl_options["progress_hooks"] = [
-                self._make_yt_dlp_progress_hook(progress_hook),
+                self._make_yt_dlp_progress_hook(
+                    progress_hook,
+                    cancel_event=cancel_event,
+                ),
             ]
 
         with yt_dlp.YoutubeDL(ydl_options) as ydl:
@@ -513,6 +659,22 @@ class Downloader:
             )
 
         return file_path
+
+    @staticmethod
+    def _remove_partial_files(
+        directory: Path,
+    ) -> None:
+        """
+        Remove partial/temporary files (e.g. yt-dlp's `.part`/`.ytdl`
+        sidecar files) left behind in `directory` by an interrupted
+        download, without touching any other, unrelated file.
+        """
+        for pattern in ("*.part", "*.ytdl"):
+            for partial_file in directory.glob(pattern):
+                try:
+                    partial_file.unlink()
+                except OSError:
+                    pass
 
     @staticmethod
     def _get_merge_extension(
