@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 
 class DownloadType(str, Enum):
@@ -30,9 +29,9 @@ class DownloadOptions:
     url: str
     download_type: DownloadType
 
-    format_id: Optional[str] = None
-    max_height: Optional[int] = None
-    audio_bitrate: Optional[int] = None
+    format_id: str | None = None
+    max_height: int | None = None
+    audio_bitrate: int | None = None
 
     destination: Path = Path(".")
 
@@ -44,13 +43,13 @@ class DownloadProgress:
     status: DownloadStatus = DownloadStatus.PENDING
 
     percentage: float = 0.0
-    downloaded_bytes: int = 0
-    total_bytes: Optional[int] = None
+    downloaded_bytes: int | None = None
+    total_bytes: int | None = None
 
-    speed: Optional[float] = None
-    eta: Optional[float] = None
+    speed: float | None = None
+    eta: float | None = None
 
-    filename: Optional[str] = None
+    filename: str | None = None
 
 
 @dataclass(frozen=True)
@@ -59,7 +58,7 @@ class DownloadResult:
 
     success: bool
 
-    file_path: Optional[Path] = None
-    file_size: Optional[int] = None
+    file_path: Path | None = None
+    file_size: int | None = None
 
-    error_message: Optional[str] = None
+    error_message: str | None = None

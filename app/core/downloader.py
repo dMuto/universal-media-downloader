@@ -1,20 +1,23 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
 import yt_dlp
 
+from app.core.ffmpeg_service import FFmpegError, FFmpegService
 from app.models import (
     DownloadOptions,
+    DownloadProgress,
     DownloadResult,
+    DownloadStatus,
     FormatInfo,
     FormatSelection,
     MediaInfo,
     MediaType,
 )
-from app.core.ffmpeg_service import FFmpegError, FFmpegService
 
 
 class MediaAnalysisError(Exception):
@@ -59,9 +62,7 @@ class Downloader:
                 )
 
         except yt_dlp.utils.DownloadError as exc:
-            raise MediaAnalysisError(
-                f"Não foi possível analisar a URL: {exc}"
-            ) from exc
+            raise MediaAnalysisError(f"Não foi possível analisar a URL: {exc}") from exc
 
         except Exception as exc:
             raise MediaAnalysisError(
@@ -69,9 +70,7 @@ class Downloader:
             ) from exc
 
         if not info:
-            raise MediaAnalysisError(
-                "O yt-dlp não retornou informações sobre a mídia."
-            )
+            raise MediaAnalysisError("O yt-dlp não retornou informações sobre a mídia.")
 
         return self._build_media_info(info)
 
@@ -79,12 +78,19 @@ class Downloader:
         self,
         options: DownloadOptions,
         selection: FormatSelection,
+        progress_hook: Callable[[DownloadProgress], None] | None = None,
     ) -> DownloadResult:
         """
         Download the selected formats using yt-dlp.
 
         When video and audio are separate, they are downloaded into
         temporary files and merged using FFmpegService.
+
+        When `progress_hook` is provided, it is invoked with a
+        `DownloadProgress` adapted from yt-dlp's own `progress_hooks`
+        dictionaries as the download advances. Only the fields present
+        in the underlying yt-dlp dictionary are populated; fields that
+        are absent are left as `None` rather than assuming a value.
         """
         if not options.url or not options.url.strip():
             return DownloadResult(
@@ -109,9 +115,7 @@ class Downloader:
         except OSError as exc:
             return DownloadResult(
                 success=False,
-                error_message=(
-                    f"Não foi possível criar a pasta de destino: {exc}"
-                ),
+                error_message=(f"Não foi possível criar a pasta de destino: {exc}"),
             )
 
         try:
@@ -120,25 +124,22 @@ class Downloader:
                     options=options,
                     selection=selection,
                     destination=destination,
+                    progress_hook=progress_hook,
                 )
 
-            selected_format = (
-                selection.video_format
-                or selection.audio_format
-            )
+            selected_format = selection.video_format or selection.audio_format
 
             if selected_format is None:
                 return DownloadResult(
                     success=False,
-                    error_message=(
-                        "Não foi possível determinar o formato."
-                    ),
+                    error_message=("Não foi possível determinar o formato."),
                 )
 
             file_path = self._download_single_format(
                 url=options.url,
                 format_id=selected_format.format_id,
                 destination=destination,
+                progress_hook=progress_hook,
             )
 
             return DownloadResult(
@@ -168,10 +169,7 @@ class Downloader:
         except Exception as exc:
             return DownloadResult(
                 success=False,
-                error_message=(
-                    "Ocorreu um erro inesperado durante o download: "
-                    f"{exc}"
-                ),
+                error_message=(f"Ocorreu um erro inesperado durante o download: {exc}"),
             )
 
     @staticmethod
@@ -190,11 +188,7 @@ class Downloader:
             duration=info.get("duration"),
             uploader=info.get("uploader") or info.get("channel"),
             thumbnail=info.get("thumbnail"),
-            original_url=(
-                info.get("webpage_url")
-                or info.get("original_url")
-                or ""
-            ),
+            original_url=(info.get("webpage_url") or info.get("original_url") or ""),
             formats=formats,
         )
 
@@ -203,13 +197,9 @@ class Downloader:
         format_data: dict[str, Any],
     ) -> FormatInfo:
         """Convert a raw yt-dlp format into a FormatInfo model."""
-        video_codec = Downloader._normalize_codec(
-            format_data.get("vcodec")
-        )
+        video_codec = Downloader._normalize_codec(format_data.get("vcodec"))
 
-        audio_codec = Downloader._normalize_codec(
-            format_data.get("acodec")
-        )
+        audio_codec = Downloader._normalize_codec(format_data.get("acodec"))
 
         return FormatInfo(
             format_id=str(format_data.get("format_id", "")),
@@ -219,14 +209,8 @@ class Downloader:
             fps=format_data.get("fps"),
             video_codec=video_codec,
             audio_codec=audio_codec,
-            bitrate=(
-                format_data.get("tbr")
-                or format_data.get("abr")
-            ),
-            size=(
-                format_data.get("filesize")
-                or format_data.get("filesize_approx")
-            ),
+            bitrate=(format_data.get("tbr") or format_data.get("abr")),
+            size=(format_data.get("filesize") or format_data.get("filesize_approx")),
             media_type=Downloader._get_media_type(
                 video_codec=video_codec,
                 audio_codec=audio_codec,
@@ -293,6 +277,66 @@ class Downloader:
         return has_video or has_audio
 
     @staticmethod
+    def _make_yt_dlp_progress_hook(
+        progress_hook: Callable[[DownloadProgress], None],
+    ) -> Callable[[dict[str, Any]], None]:
+        """
+        Build a yt-dlp-compatible progress hook that adapts yt-dlp's raw
+        progress dictionary into a DownloadProgress before delegating to
+        the caller-supplied progress_hook.
+        """
+
+        def yt_dlp_hook(raw_progress: dict[str, Any]) -> None:
+            progress_hook(
+                Downloader._build_download_progress(raw_progress),
+            )
+
+        return yt_dlp_hook
+
+    @staticmethod
+    def _build_download_progress(
+        raw_progress: dict[str, Any],
+    ) -> DownloadProgress:
+        """
+        Convert a raw yt-dlp progress_hooks dictionary into a
+        DownloadProgress.
+
+        Only the fields present in `raw_progress` are populated;
+        fields absent from the source dictionary are kept as `None`,
+        without presuming a value.
+        """
+        downloaded_bytes = raw_progress.get("downloaded_bytes")
+        total_bytes = raw_progress.get("total_bytes")
+        speed = raw_progress.get("speed")
+        eta = raw_progress.get("eta")
+        filename = raw_progress.get("filename")
+
+        percentage = 0.0
+
+        if downloaded_bytes is not None and total_bytes:
+            percentage = (downloaded_bytes / total_bytes) * 100
+
+        return DownloadProgress(
+            status=Downloader._map_progress_status(raw_progress.get("status")),
+            percentage=percentage,
+            downloaded_bytes=downloaded_bytes,
+            total_bytes=total_bytes,
+            speed=speed,
+            eta=eta,
+            filename=filename,
+        )
+
+    @staticmethod
+    def _map_progress_status(
+        raw_status: Any,
+    ) -> DownloadStatus:
+        """Map yt-dlp's raw progress status to DownloadStatus."""
+        if raw_status == "error":
+            return DownloadStatus.FAILED
+
+        return DownloadStatus.DOWNLOADING
+
+    @staticmethod
     def _get_downloaded_file_path(
         ydl: yt_dlp.YoutubeDL,
         info: dict[str, Any],
@@ -328,17 +372,21 @@ class Downloader:
         url: str,
         format_id: str,
         destination: Path,
+        progress_hook: Callable[[DownloadProgress], None] | None = None,
     ) -> Path:
         """Download a single yt-dlp format."""
         ydl_options = {
             "format": format_id,
-            "outtmpl": str(
-                destination / "%(title)s.%(ext)s"
-            ),
+            "outtmpl": str(destination / "%(title)s.%(ext)s"),
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
         }
+
+        if progress_hook is not None:
+            ydl_options["progress_hooks"] = [
+                self._make_yt_dlp_progress_hook(progress_hook),
+            ]
 
         with yt_dlp.YoutubeDL(ydl_options) as ydl:
             info = ydl.extract_info(
@@ -352,9 +400,7 @@ class Downloader:
             )
 
         if file_path is None or not file_path.is_file():
-            raise OSError(
-                "Não foi possível determinar o arquivo baixado."
-            )
+            raise OSError("Não foi possível determinar o arquivo baixado.")
 
         return file_path
 
@@ -363,18 +409,17 @@ class Downloader:
         options: DownloadOptions,
         selection: FormatSelection,
         destination: Path,
+        progress_hook: Callable[[DownloadProgress], None] | None = None,
     ) -> DownloadResult:
         """Download separate video/audio streams and merge them."""
         if selection.video_format is None:
             raise FFmpegError(
-                "A seleção requer merge, mas não possui "
-                "formato de vídeo."
+                "A seleção requer merge, mas não possui formato de vídeo."
             )
 
         if selection.audio_format is None:
             raise FFmpegError(
-                "A seleção requer merge, mas não possui "
-                "formato de áudio."
+                "A seleção requer merge, mas não possui formato de áudio."
             )
 
         if self._ffmpeg_service is None:
@@ -394,6 +439,7 @@ class Downloader:
                 format_id=video_format.format_id,
                 directory=temp_path,
                 prefix="video",
+                progress_hook=progress_hook,
             )
 
             audio_path = self._download_to_directory(
@@ -401,6 +447,7 @@ class Downloader:
                 format_id=audio_format.format_id,
                 directory=temp_path,
                 prefix="audio",
+                progress_hook=progress_hook,
             )
 
             output_extension = self._get_merge_extension(
@@ -412,9 +459,7 @@ class Downloader:
                 video_path.stem,
             )
 
-            output_path = destination / (
-                f"{output_name}{output_extension}"
-            )
+            output_path = destination / (f"{output_name}{output_extension}")
 
             final_path = self._ffmpeg_service.merge(
                 video_path=video_path,
@@ -434,17 +479,21 @@ class Downloader:
         format_id: str,
         directory: Path,
         prefix: str,
+        progress_hook: Callable[[DownloadProgress], None] | None = None,
     ) -> Path:
         """Download one selected stream into a temporary directory."""
         ydl_options = {
             "format": format_id,
-            "outtmpl": str(
-                directory / f"{prefix}_%(title)s.%(ext)s"
-            ),
+            "outtmpl": str(directory / f"{prefix}_%(title)s.%(ext)s"),
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
         }
+
+        if progress_hook is not None:
+            ydl_options["progress_hooks"] = [
+                self._make_yt_dlp_progress_hook(progress_hook),
+            ]
 
         with yt_dlp.YoutubeDL(ydl_options) as ydl:
             info = ydl.extract_info(
@@ -477,10 +526,7 @@ class Downloader:
         audio_codec = (audio_codec or "").lower()
         video_extension = (video_extension or "").lower()
 
-        if (
-            video_extension == "mp4"
-            and audio_codec.startswith("mp4a")
-        ):
+        if video_extension == "mp4" and audio_codec.startswith("mp4a"):
             return ".mp4"
 
         return ".mkv"
@@ -497,6 +543,10 @@ class Downloader:
             for character in filename
         )
 
-        sanitized = sanitized.strip().rstrip(".")
+        previous_sanitized = None
+
+        while previous_sanitized != sanitized:
+            previous_sanitized = sanitized
+            sanitized = sanitized.strip().rstrip(".")
 
         return sanitized or "media"
