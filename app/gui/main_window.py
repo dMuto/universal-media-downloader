@@ -1,27 +1,24 @@
 """Janela raiz da GUI (CustomTkinter).
 
-`MainWindow` é responsável por montar a janela principal do aplicativo e
-por manter o único ponto de contato seguro entre as worker threads do
-`DownloadService` e a thread principal (thread da GUI/Tkinter).
+`MainWindow` monta a janela principal e mantem o unico ponto de contato
+seguro entre as worker threads do `DownloadService` e a thread principal.
 
-Conforme o design (`design.md`, seção "Threading e comunicação com a GUI"):
-`DownloadService.analyze`/`start_download` invocam `on_progress`/
-`on_complete` diretamente da worker thread que executa a operação. A GUI
-nunca pode tocar em um widget Tkinter fora da thread principal, então o
-padrão adotado aqui é:
-
-1. Os callbacks entregues ao `DownloadService` (`on_progress`/
-   `on_complete`) fazem apenas `queue.put(...)`, uma operação thread-safe,
-   sem tocar em nenhum widget.
+Padrao de threading (design.md, secao "Threading e comunicacao com a GUI"):
+1. Callbacks entregues ao `DownloadService` (`on_progress`/`on_complete`)
+   apenas enfileiram o valor recebido (`queue.put`), sem tocar em widgets.
 2. `MainWindow` agenda `_poll_operations` via `self.after(ms, callback)`,
-   que roda periodicamente **na thread principal**. A cada execução, ele
-   drena as filas pendentes de todas as operações registradas e só então
-   invoca os handlers (`on_progress`/`on_complete`) fornecidos por quem
-   registrou a operação (ex.: `DownloadPanel`, nas tarefas 17.2+), que são
-   os únicos pontos autorizados a atualizar widgets.
+   que roda periodicamente na thread principal, drena as filas pendentes
+   e so entao invoca os handlers reais, que podem tocar em widgets.
 
-Esta classe não importa nada de `app.core`: apenas `app.services` e
-`app.models`, conforme o Requisito 12.8.
+Esta classe nao importa nada de `app.core`: apenas `app.services` e
+`app.models` (Requisito 12.8).
+
+`MainWindow` monta `DownloadPanel` e `HistoryPanel` dentro de
+`content_frame` (design.md, secao "app/gui (novo)"). Em vez de passar o
+`DownloadService` real diretamente ao `DownloadPanel`, injeta um
+`_MainThreadDownloadService`, que envolve `analyze`/`start_download` com
+`register_operation`, garantindo que os callbacks do painel so sejam
+chamados a partir de `_poll_operations`, na thread principal.
 """
 
 from __future__ import annotations
@@ -31,109 +28,156 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import customtkinter
 
+from app.gui.download_panel import DownloadPanel
+from app.gui.history_panel import HistoryPanel
 from app.services.config_service import ConfigService
 from app.services.download_service import DownloadService
 from app.services.history_service import HistoryService
+from app.services.log_service import LogService
 
-#: Intervalo padrão, em milissegundos, entre drenagens sucessivas das
-#: filas de progresso/resultado das operações ativas.
 DEFAULT_POLL_INTERVAL_MS = 100
 
 
 @dataclass
 class _RegisteredOperation:
-    """Estado interno mantido por `MainWindow` para uma operação registrada
-    via `register_operation`.
-
-    As filas são preenchidas (via `.put`) pelos callbacks retornados por
-    `register_operation`, chamados pela worker thread do `DownloadService`.
-    Os handlers `on_progress`/`on_complete` são invocados exclusivamente a
-    partir de `_poll_operations`, ou seja, na thread principal.
-    """
-
-    progress_queue: "queue.Queue[Any]" = field(default_factory=queue.Queue)
-    complete_queue: "queue.Queue[Any]" = field(default_factory=queue.Queue)
+    progress_queue: queue.Queue[Any] = field(default_factory=queue.Queue)
+    complete_queue: queue.Queue[Any] = field(default_factory=queue.Queue)
     on_progress: Callable[[Any], None] | None = None
     on_complete: Callable[[Any], None] | None = None
 
 
+class _MainThreadDownloadService:
+    """Adapta `DownloadService` para que `on_progress`/`on_complete`
+    sejam invocados somente a partir de `_poll_operations`, na thread
+    principal, via `register_operation`."""
+
+    def __init__(
+        self, main_window: MainWindow, download_service: DownloadService
+    ) -> None:
+        self._main_window = main_window
+        self._download_service = download_service
+
+    def analyze(self, url, on_complete=None):
+        local_id = uuid4()
+
+        def _handle_complete(payload):
+            media, error = payload
+            try:
+                if on_complete is not None:
+                    on_complete(media, error)
+            finally:
+                self._main_window.unregister_operation(local_id)
+
+        _, complete_callback = self._main_window.register_operation(
+            local_id, on_complete=_handle_complete
+        )
+
+        return self._download_service.analyze(
+            url,
+            on_complete=lambda media, error: complete_callback((media, error)),
+        )
+
+    def start_download(self, media, options, on_progress=None, on_complete=None):
+        local_id = uuid4()
+
+        def _handle_complete(result):
+            try:
+                if on_complete is not None:
+                    on_complete(result)
+            finally:
+                self._main_window.refresh_history()
+                self._main_window.unregister_operation(local_id)
+
+        progress_callback, complete_callback = self._main_window.register_operation(
+            local_id, on_progress=on_progress, on_complete=_handle_complete
+        )
+
+        return self._download_service.start_download(
+            media,
+            options,
+            on_progress=progress_callback,
+            on_complete=complete_callback,
+        )
+
+    def cancel(self, operation_id):
+        self._download_service.cancel(operation_id)
+
+    def get_progress(self, operation_id):
+        return self._download_service.get_progress(operation_id)
+
+    def get_log_path(self):
+        return self._download_service.get_log_path()
+
+
 class MainWindow(customtkinter.CTk):
-    """Janela raiz do aplicativo.
-
-    Monta a estrutura básica da janela (`content_frame`, onde os painéis
-    das tarefas 17.2/17.4 — `DownloadPanel` e `HistoryPanel` — serão
-    posicionados) e mantém o laço de polling que drena progresso/resultado
-    das operações ativas na thread principal.
-
-    `download_service`/`config_service`/`history_service` podem ser
-    informados (útil em testes, com fakes/stubs) ou, se omitidos, são
-    construídos com seus valores padrão — a GUI nunca instancia
-    `Downloader`, `FormatSelector` ou `FFmpegService` diretamente.
-    """
+    """Janela raiz do aplicativo: monta `content_frame` com `DownloadPanel`
+    e `HistoryPanel`, e mantem o laco de polling thread-safe."""
 
     def __init__(
         self,
         download_service: DownloadService | None = None,
         config_service: ConfigService | None = None,
         history_service: HistoryService | None = None,
+        log_service: LogService | None = None,
         poll_interval_ms: int = DEFAULT_POLL_INTERVAL_MS,
         auto_poll: bool = True,
+        build_panels: bool = True,
     ) -> None:
         super().__init__()
 
-        self.download_service = (
-            download_service if download_service is not None else DownloadService()
-        )
+        self.log_service = log_service if log_service is not None else LogService()
         self.config_service = (
             config_service if config_service is not None else ConfigService()
         )
         self.history_service = (
             history_service if history_service is not None else HistoryService()
         )
+        self.download_service = (
+            download_service
+            if download_service is not None
+            else DownloadService(
+                config_service=self.config_service,
+                history_service=self.history_service,
+                log_service=self.log_service,
+            )
+        )
 
         self._poll_interval_ms = poll_interval_ms
 
-        # Protege `_operations` contra acesso concorrente: é lido/escrito
-        # pela thread principal (register/unregister/poll) e as filas
-        # internas de cada operação são escritas pelas worker threads do
-        # `DownloadService` via os callbacks retornados por
-        # `register_operation`.
         self._operations_lock = threading.Lock()
         self._operations: dict[UUID, _RegisteredOperation] = {}
 
         self.title("Universal Media Downloader")
+        self.geometry("720x640")
 
-        # Container genérico onde `DownloadPanel`/`HistoryPanel` (tarefas
-        # 17.2/17.4) serão montados. Mantido aqui para que esta subtarefa
-        # já deixe um ponto de extensão estável, sem precisar antecipar a
-        # implementação desses painéis.
         self.content_frame = customtkinter.CTkFrame(self)
         self.content_frame.pack(fill="both", expand=True)
+
+        self.download_panel: DownloadPanel | None = None
+        self.history_panel: HistoryPanel | None = None
+
+        if build_panels:
+            proxy_service = _MainThreadDownloadService(self, self.download_service)
+            self.download_panel = DownloadPanel(self.content_frame, proxy_service)
+            self.download_panel.pack(fill="x", padx=10, pady=(10, 5))
+
+            self.history_panel = HistoryPanel(
+                self.content_frame, history_service=self.history_service
+            )
+            self.history_panel.refresh()
 
         if auto_poll:
             self._schedule_poll()
 
-    def register_operation(
-        self,
-        operation_id: UUID,
-        on_progress: Callable[[Any], None] | None = None,
-        on_complete: Callable[[Any], None] | None = None,
-    ) -> tuple[Callable[[Any], None], Callable[[Any], None]]:
-        """Registra os handlers de UI para `operation_id` e retorna o par
-        de callbacks thread-safe a ser passado como `on_progress`/
-        `on_complete` ao `DownloadService` (ex.: em
-        `DownloadService.analyze`/`start_download`).
+    def refresh_history(self) -> None:
+        if self.history_panel is not None:
+            self.history_panel.refresh()
 
-        Os callbacks retornados apenas colocam o valor recebido em uma
-        fila interna; eles podem ser chamados com segurança a partir de
-        qualquer worker thread. `on_progress`/`on_complete` (os handlers
-        fornecidos aqui) só são efetivamente invocados mais tarde, a
-        partir de `_poll_operations`, na thread principal.
-        """
+    def register_operation(self, operation_id, on_progress=None, on_complete=None):
         registered = _RegisteredOperation(
             on_progress=on_progress,
             on_complete=on_complete,
@@ -141,40 +185,22 @@ class MainWindow(customtkinter.CTk):
         with self._operations_lock:
             self._operations[operation_id] = registered
 
-        def progress_callback(progress: Any) -> None:
+        def progress_callback(progress):
             registered.progress_queue.put(progress)
 
-        def complete_callback(result: Any) -> None:
+        def complete_callback(result):
             registered.complete_queue.put(result)
 
         return progress_callback, complete_callback
 
-    def unregister_operation(self, operation_id: UUID) -> None:
-        """Remove o registro de `operation_id`, se existir.
-
-        É um no-op silencioso quando `operation_id` não está registrado,
-        para que painéis possam limpar operações já finalizadas sem
-        precisar verificar previamente se o registro ainda existe.
-        """
+    def unregister_operation(self, operation_id) -> None:
         with self._operations_lock:
             self._operations.pop(operation_id, None)
 
     def _schedule_poll(self) -> None:
-        """Agenda a próxima execução de `_poll_operations` na thread
-        principal, via o mecanismo de agendamento do Tkinter."""
         self.after(self._poll_interval_ms, self._poll_operations)
 
     def _poll_operations(self, reschedule: bool = True) -> None:
-        """Drena as filas de progresso/resultado de todas as operações
-        registradas e invoca os handlers correspondentes.
-
-        Executado na thread principal: é seguro atualizar widgets a
-        partir dos handlers `on_progress`/`on_complete` chamados aqui.
-
-        `reschedule=False` é usado apenas por testes, para drenar as
-        filas uma única vez sem criar um novo agendamento via
-        `self.after`.
-        """
         with self._operations_lock:
             operations = list(self._operations.items())
 

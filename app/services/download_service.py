@@ -10,6 +10,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from app.core.downloader import Downloader, MediaAnalysisError
+from app.core.error_messages import translate_error
 from app.core.ffmpeg_service import FFmpegService
 from app.core.format_selector import FormatSelector
 from app.models import (
@@ -23,26 +24,22 @@ from app.models import (
 )
 from app.services.config_service import ConfigService
 from app.services.history_service import HistoryService
+from app.services.log_service import LogService
 
 
 def _format_error_message(exc: Exception) -> str:
     """Traduz uma exceção interna arbitrária (yt_dlp, subprocess, threading
-    ou qualquer outra) em uma `error_message` textual garantidamente não
-    vazia, adequada para `DownloadResult`/`on_complete` (Requisitos 9.4,
-    10.4).
+    ou qualquer outra) em uma `error_message` textual amigável,
+    garantidamente não vazia, adequada para `DownloadResult`/`on_complete`
+    (Requisitos 9.4, 10.4).
 
-    A maioria das exceções relevantes (`yt_dlp.utils.DownloadError`,
-    `FFmpegError`, `FormatSelectionError`, `OSError`, etc.) stringificam
-    para a mensagem descritiva que receberam na construção, então
-    `str(exc)` já é suficiente na prática. Esta função apenas cobre o caso
-    degenerado em que `str(exc)` é vazio (ex.: `RuntimeError()` sem
-    argumentos), recorrendo ao nome do tipo da exceção para que o texto
-    nunca fique vazio.
+    Delega a tradução para `app.core.error_messages.translate_error`, que
+    reconhece os padrões de erro mais comuns (link não suportado, vídeo
+    privado/indisponível, falha de rede, FFmpeg ausente, permissão de
+    escrita, etc.) e cai de volta para `str(exc)` (ou o nome do tipo da
+    exceção, se vazio) quando nenhum padrão é reconhecido.
     """
-    message = str(exc).strip()
-    if message:
-        return message
-    return type(exc).__name__
+    return translate_error(exc)
 
 
 @dataclass(frozen=True)
@@ -88,6 +85,7 @@ class DownloadService:
         ffmpeg_service: FFmpegService | None = None,
         config_service: ConfigService | None = None,
         history_service: HistoryService | None = None,
+        log_service: LogService | None = None,
     ) -> None:
         self._downloader = downloader if downloader is not None else Downloader()
         self._format_selector = (
@@ -102,6 +100,7 @@ class DownloadService:
         self._history_service = (
             history_service if history_service is not None else HistoryService()
         )
+        self._log_service = log_service if log_service is not None else LogService()
 
         # Rastreamento interno de operações em curso/concluídas, protegido
         # por `_operations_lock` pois `get_progress`/`cancel` são chamados
@@ -129,6 +128,13 @@ class DownloadService:
             operation_state = self._operations.get(operation_id)
             return operation_state.progress if operation_state is not None else None
 
+    def get_log_path(self) -> Path:
+        """Retorna o caminho do arquivo `.txt` onde o log completo do
+        processo (análise, seleção de formato, download, merge, conversão,
+        cancelamento e erros) é registrado. Usado pela GUI para oferecer
+        um atalho de "ver log" ao usuário."""
+        return self._log_service.log_path
+
     def cancel(self, operation_id: UUID) -> None:
         """Sinaliza o `cancel_event` associado a `operation_id`, solicitando
         o cancelamento cooperativo da operação.
@@ -150,6 +156,10 @@ class DownloadService:
                 return
             operation_state.cancel_event.set()
 
+        self._log_service.write(
+            f"[{operation_id}] Cancelamento solicitado pelo usuário."
+        )
+
     def analyze(
         self,
         url: str,
@@ -170,6 +180,8 @@ class DownloadService:
                 progress=DownloadProgress(status=DownloadStatus.PENDING),
             )
 
+        self._log_service.write(f"[{operation_id}] Análise iniciada. URL: {url!r}")
+
         def _run_analysis() -> None:
             self._set_progress(operation_id, DownloadStatus.ANALYZING)
 
@@ -177,16 +189,31 @@ class DownloadService:
                 media_info = self._downloader.analyze(url)
             except MediaAnalysisError as exc:
                 self._set_progress(operation_id, DownloadStatus.FAILED)
+                error_message = _format_error_message(exc)
+                self._log_service.write(
+                    f"[{operation_id}] Análise falhou. Erro amigável: "
+                    f"{error_message!r}. Detalhe técnico: {exc!r}"
+                )
                 if on_complete is not None:
-                    on_complete(None, _format_error_message(exc))
+                    on_complete(None, error_message)
                 return
             except Exception as exc:  # noqa: BLE001 - nunca deixar escapar da worker
                 self._set_progress(operation_id, DownloadStatus.FAILED)
+                error_message = _format_error_message(exc)
+                self._log_service.write(
+                    f"[{operation_id}] Análise falhou com exceção inesperada. "
+                    f"Erro amigável: {error_message!r}. Detalhe técnico: {exc!r}"
+                )
                 if on_complete is not None:
-                    on_complete(None, _format_error_message(exc))
+                    on_complete(None, error_message)
                 return
 
             self._set_progress(operation_id, DownloadStatus.COMPLETED)
+            self._log_service.write(
+                f"[{operation_id}] Análise concluída com sucesso. "
+                f"Título: {media_info.title!r}. "
+                f"Formatos encontrados: {len(media_info.formats)}."
+            )
             if on_complete is not None:
                 on_complete(media_info, None)
 
@@ -275,6 +302,14 @@ class DownloadService:
             self._operations[operation_id] = operation_state
             cancel_event = operation_state.cancel_event
 
+        self._log_service.write(
+            f"[{operation_id}] Download iniciado. URL: {effective_options.url!r}, "
+            f"tipo: {effective_options.download_type.value}, "
+            f"altura máxima: {effective_options.max_height!r}, "
+            f"bitrate de áudio: {effective_options.audio_bitrate!r}, "
+            f"destino: {effective_options.destination!r}"
+        )
+
         def _emit(progress: DownloadProgress) -> None:
             with self._operations_lock:
                 current_state = self._operations.get(operation_id)
@@ -315,6 +350,17 @@ class DownloadService:
             status = _terminal_status(succeeded=result.success)
             _emit(DownloadProgress(status=status))
 
+            if status == DownloadStatus.COMPLETED:
+                self._log_service.write(
+                    f"[{operation_id}] Download concluído com sucesso. "
+                    f"Arquivo: {result.file_path!r}, tamanho: {result.file_size!r} bytes."
+                )
+            else:
+                self._log_service.write(
+                    f"[{operation_id}] Download finalizado com status "
+                    f"{status.value}. Erro: {result.error_message!r}"
+                )
+
             self._history_service.add_entry(
                 HistoryEntry(
                     url=effective_options.url,
@@ -340,12 +386,20 @@ class DownloadService:
             try:
                 selection = self._format_selector.select(media, effective_options)
             except Exception as exc:  # noqa: BLE001 - nunca deixar escapar da worker
-                _finalize(
-                    DownloadResult(
-                        success=False, error_message=_format_error_message(exc)
-                    )
+                error_message = _format_error_message(exc)
+                self._log_service.write(
+                    f"[{operation_id}] Seleção de formato falhou. Erro amigável: "
+                    f"{error_message!r}. Detalhe técnico: {exc!r}"
                 )
+                _finalize(DownloadResult(success=False, error_message=error_message))
                 return
+
+            self._log_service.write(
+                f"[{operation_id}] Formato selecionado. Vídeo: "
+                f"{getattr(selection.video_format, 'format_id', None)!r}, "
+                f"Áudio: {getattr(selection.audio_format, 'format_id', None)!r}, "
+                f"requer merge: {selection.requires_merge}"
+            )
 
             try:
                 result = self._downloader.download(
@@ -355,11 +409,12 @@ class DownloadService:
                     cancel_event=cancel_event,
                 )
             except Exception as exc:  # noqa: BLE001 - nunca deixar escapar da worker
-                _finalize(
-                    DownloadResult(
-                        success=False, error_message=_format_error_message(exc)
-                    )
+                error_message = _format_error_message(exc)
+                self._log_service.write(
+                    f"[{operation_id}] Download falhou com exceção inesperada. "
+                    f"Erro amigável: {error_message!r}. Detalhe técnico: {exc!r}"
                 )
+                _finalize(DownloadResult(success=False, error_message=error_message))
                 return
 
             # `Downloader.download` performs the merge step synchronously

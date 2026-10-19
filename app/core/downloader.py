@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -7,8 +8,10 @@ from typing import Any
 
 import yt_dlp
 
+from app.core.error_messages import translate_error
 from app.core.ffmpeg_service import FFmpegError, FFmpegService
 from app.core.format_selector import FormatSelectionError
+from app.core.ytdlp_compat_patches import apply_compatibility_patches
 from app.models import (
     DownloadOptions,
     DownloadProgress,
@@ -48,6 +51,10 @@ class Downloader:
         ffmpeg_service: FFmpegService | None = None,
     ) -> None:
         self._ffmpeg_service = ffmpeg_service
+        # Corrige bugs pontuais e conhecidos de extratores específicos do
+        # yt-dlp (ver `app.core.ytdlp_compat_patches`) antes de qualquer
+        # uso de `yt_dlp.YoutubeDL` por esta instância.
+        apply_compatibility_patches()
 
     def analyze(self, url: str) -> MediaInfo:
         """
@@ -74,11 +81,13 @@ class Downloader:
                 )
 
         except yt_dlp.utils.DownloadError as exc:
-            raise MediaAnalysisError(f"Não foi possível analisar a URL: {exc}") from exc
+            raise MediaAnalysisError(translate_error(exc)) from exc
 
         except Exception as exc:
             raise MediaAnalysisError(
-                "Ocorreu um erro inesperado ao analisar a mídia."
+                translate_error(
+                    exc, default="Ocorreu um erro inesperado ao analisar a mídia."
+                )
             ) from exc
 
         if not info:
@@ -190,31 +199,33 @@ class Downloader:
         except yt_dlp.utils.DownloadError as exc:
             return DownloadResult(
                 success=False,
-                error_message=f"Erro durante o download: {exc}",
+                error_message=translate_error(exc),
             )
 
         except FFmpegError as exc:
             return DownloadResult(
                 success=False,
-                error_message=f"Erro no FFmpeg: {exc}",
+                error_message=translate_error(exc),
             )
 
         except FormatSelectionError as exc:
             return DownloadResult(
                 success=False,
-                error_message=f"Erro na seleção de formato: {exc}",
+                error_message=translate_error(exc),
             )
 
         except OSError as exc:
             return DownloadResult(
                 success=False,
-                error_message=f"Erro ao acessar arquivos: {exc}",
+                error_message=translate_error(exc),
             )
 
         except Exception as exc:
             return DownloadResult(
                 success=False,
-                error_message=(f"Ocorreu um erro inesperado durante o download: {exc}"),
+                error_message=translate_error(
+                    exc, default="Ocorreu um erro inesperado durante o download."
+                ),
             )
 
     @staticmethod
