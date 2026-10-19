@@ -359,10 +359,54 @@ As subtarefas de verificação manual/estrutural (não automatizáveis via pytes
     - Ensure all tests pass, ask the user if questions arise.
     - _Requirements: 15.1, 15.2, 15.3, 15.4, 15.5_
 
+### Fase 3 — Melhorias identificadas em revisão de código (pós-implementação)
+
+> Estas tarefas não derivam de `requirements.md`/`design.md` originais; foram identificadas em uma revisão de código posterior à conclusão da Fase 2 (dependências não fixadas, cleanup de recursos, condição de corrida, ausência de CI, logging silencioso, empacotamento e organização do repositório). Mantidas aqui para rastreabilidade e execução incremental.
+
+- [ ] 21. Fixar dependências de runtime
+  - Criar `requirements.txt` na raiz com `yt-dlp` e `customtkinter` fixados em versões específicas, no mesmo padrão já usado por `requirements-dev.txt`
+  - Atualizar a seção "Instalação" do `README.md` para `pip install -r requirements.txt` em vez de `pip install yt-dlp customtkinter`
+  - Validar que `pip install -r requirements-dev.txt` resolve corretamente em um ambiente limpo; corrigir o pin `pytest==9.1.1` caso essa versão não exista no PyPI
+
+- [ ] 22. Encerrar corretamente o `ThreadPoolExecutor` do `DownloadService`
+  - Adicionar `DownloadService.shutdown(wait: bool = True)`, chamando `self._executor.shutdown(wait=wait)`
+  - Registrar `protocol("WM_DELETE_WINDOW", ...)` em `MainWindow` chamando `DownloadService.shutdown()` ao fechar a janela
+  - Adicionar teste cobrindo que, após `shutdown()`, novas submissões não são aceitas e operações em curso são aguardadas
+
+- [ ] 23. Corrigir condição de corrida em `HistoryService`
+  - Proteger a sequência `_load_entries` + modificação + `_save_entries` (usada por `add_entry`) com um `threading.Lock` de instância, evitando perda de entradas quando duas operações terminam concorrentemente
+  - Adicionar teste de concorrência (múltiplas threads chamando `add_entry` simultaneamente) confirmando que nenhuma entrada é perdida
+
+- [ ] 24. Configurar integração contínua (CI)
+  - Criar `.github/workflows/tests.yml` (GitHub Actions) executando `pip install -r requirements.txt -r requirements-dev.txt` e `pytest` em push/PR
+  - Adicionar configuração de lint/type-check (`ruff` e/ou `mypy`) em `pyproject.toml` e incluí-la no workflow
+
+- [ ] 25. Adicionar logging em tratamentos de exceção hoje silenciosos
+  - Registrar via `LogService` (ou `logging` padrão) quando `ConfigService.load()` e `HistoryService._load_entries()` capturam exceções e retornam valores padrão
+  - Garantir que a mensagem registrada inclua o tipo da exceção e o caminho do arquivo afetado, sem expor esse detalhe ao usuário final na GUI
+
+- [ ] 26. Adicionar metadados de empacotamento ao executável Windows
+  - Definir `icon=` no `EXE(...)` de `media_downloader.spec`, apontando para um ícone `.ico` do aplicativo
+  - Gerar e referenciar um arquivo de version-info (nome do produto, versão, empresa) via parâmetro `version=` do `EXE(...)`
+
+- [ ] 27. Reorganizar scripts de depuração fora do código de produção
+  - Mover `main.py`, `testar_links.py` e `verificar_suporte_links.py` para uma pasta `scripts/`
+  - Atualizar `README.md` com os novos caminhos desses scripts
+
+- [ ] 28. Padronizar idioma da documentação de código do Core
+  - Traduzir docstrings e comentários em inglês de `app/core/downloader.py`, `app/core/format_selector.py` e `app/core/ffmpeg_service.py` para português, alinhando com o restante do projeto (Services, GUI, README)
+
+- [ ] 29. Reforçar e documentar a defesa contra path traversal na sanitização de nomes de arquivo
+  - Adicionar teste explícito em `tests/core/test_filename_sanitization.py` garantindo que nenhuma entrada (incluindo sequências `..`, caminhos absolutos ou UNC) resulta em escrita fora do diretório de destino
+  - Documentar essa garantia no docstring de `_sanitize_filename`
+
+- [ ]* 30. Concluir as verificações manuais pendentes da Fase 2
+  - Executar as verificações `*`-marcadas ainda abertas: 17.7 (revisão visual da GUI), 19.1 (smoke test do executável PyInstaller) e 19.2 (comportamento sem FFmpeg instalado)
+
 ## Notes
 
 - **TDD estrito**: a Fase 1 escreve toda a suíte de testes antes de qualquer implementação nova. Testes sobre código já existente (Seção 2) devem passar de imediato; testes sobre código ainda não implementado (Seções 3 a 6) devem falhar nesta fase por ausência de implementação (`ImportError`/`AttributeError`/`NotImplementedError`), nunca por erro de lógica de teste. A Fase 2 não escreve nenhum teste novo — apenas implementa código até a suíte inteira ficar verde.
-- Tarefas marcadas com `*` (15.8, 17.7, 19.1, 19.2) são verificações manuais/estruturais não automatizáveis via pytest; foram posicionadas na Fase 2, no ponto em que o artefato correspondente já existe para ser inspecionado.
+- Tarefas marcadas com `*` (15.8, 17.7, 19.1, 19.2, 30) são verificações manuais/estruturais não automatizáveis via pytest; foram posicionadas na Fase 2, no ponto em que o artefato correspondente já existe para ser inspecionado (ou, no caso de 30, para acompanhar os itens ainda não concluídos).
 - Nenhuma tarefa reescreve `app/models`, `app/core/downloader.py`, `app/core/format_selector.py` ou `app/core/ffmpeg_service.py` do zero — apenas estende aditivamente os pontos descritos em "Components and Interfaces" do design.md.
 - `FormatSelector` não é alterado por nenhuma tarefa; apenas recebe testes para o comportamento já existente (Requisito 15).
 - Testes de propriedade usam Hypothesis com no mínimo 100 exemplos por propriedade, conforme a Testing Strategy do design.md.
@@ -407,7 +451,12 @@ As subtarefas de verificação manual/estrutural (não automatizáveis via pytes
     { "id": 30, "tasks": ["17.7"] },
     { "id": 31, "tasks": ["19.1"] },
     { "id": 32, "tasks": ["19.2"] },
-    { "id": 33, "tasks": ["20.1"] }
+    { "id": 33, "tasks": ["20.1"] },
+    { "id": 34, "tasks": ["21", "27", "28", "29"] },
+    { "id": 35, "tasks": ["22", "23", "26"] },
+    { "id": 36, "tasks": ["24"] },
+    { "id": 37, "tasks": ["25"] },
+    { "id": 38, "tasks": ["30"] }
   ]
 }
 ```
