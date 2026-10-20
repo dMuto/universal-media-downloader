@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from datetime import datetime
 from pathlib import Path
 
 from app.models.download import DownloadStatus, DownloadType
 from app.models.history import HistoryEntry
+from app.services.log_service import LogService
 
 _APP_DIR_NAME = "UniversalMediaDownloader"
 _HISTORY_FILE_NAME = "history.json"
@@ -33,8 +35,19 @@ class HistoryService:
     entradas é baixo (uso pessoal, não concorrente entre processos) e
     não há necessidade de consultas relacionais."""
 
-    def __init__(self, history_path: Path | None = None) -> None:
-        self._history_path = Path(history_path) if history_path is not None else _default_history_path()
+    def __init__(
+        self,
+        history_path: Path | None = None,
+        log_service: LogService | None = None,
+    ) -> None:
+        self._history_path = (
+            Path(history_path) if history_path is not None else _default_history_path()
+        )
+        self._log_service = log_service if log_service is not None else LogService()
+        # Protects the load -> modify -> save sequence below so that two
+        # threads calling `add_entry` concurrently cannot both read the same
+        # on-disk state and overwrite each other's entry (lost update).
+        self._lock = threading.Lock()
 
     @property
     def history_path(self) -> Path:
@@ -43,9 +56,10 @@ class HistoryService:
 
     def add_entry(self, entry: HistoryEntry) -> None:
         """Acrescenta uma entrada e persiste imediatamente."""
-        entries = self._load_entries()
-        entries.append(entry)
-        self._save_entries(entries)
+        with self._lock:
+            entries = self._load_entries()
+            entries.append(entry)
+            self._save_entries(entries)
 
     def list_entries(self) -> list[HistoryEntry]:
         """
@@ -53,7 +67,8 @@ class HistoryService:
         indicando via HistoryEntry.file_exists se o arquivo referenciado
         ainda existe no sistema de arquivos.
         """
-        return self._load_entries()
+        with self._lock:
+            return self._load_entries()
 
     def _load_entries(self) -> list[HistoryEntry]:
         try:
@@ -68,7 +83,13 @@ class HistoryService:
                 except Exception:
                     continue
             return entries
-        except Exception:
+        except Exception as exc:
+            self._log_service.write(
+                "HistoryService._load_entries falhou ao ler/interpretar o "
+                f"arquivo de histórico em {self._history_path}. Usando "
+                f"lista vazia. Tipo da exceção: {type(exc).__name__}. "
+                f"Detalhe: {exc!r}"
+            )
             return []
 
     def _save_entries(self, entries: list[HistoryEntry]) -> None:

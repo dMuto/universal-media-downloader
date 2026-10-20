@@ -55,9 +55,7 @@ class _MainThreadDownloadService:
     sejam invocados somente a partir de `_poll_operations`, na thread
     principal, via `register_operation`."""
 
-    def __init__(
-        self, main_window: MainWindow, download_service: DownloadService
-    ) -> None:
+    def __init__(self, main_window: MainWindow, download_service: DownloadService) -> None:
         self._main_window = main_window
         self._download_service = download_service
 
@@ -131,10 +129,14 @@ class MainWindow(customtkinter.CTk):
 
         self.log_service = log_service if log_service is not None else LogService()
         self.config_service = (
-            config_service if config_service is not None else ConfigService()
+            config_service
+            if config_service is not None
+            else ConfigService(log_service=self.log_service)
         )
         self.history_service = (
-            history_service if history_service is not None else HistoryService()
+            history_service
+            if history_service is not None
+            else HistoryService(log_service=self.log_service)
         )
         self.download_service = (
             download_service
@@ -172,6 +174,19 @@ class MainWindow(customtkinter.CTk):
 
         if auto_poll:
             self._schedule_poll()
+
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_close(self) -> None:
+        """Handler registrado via `protocol("WM_DELETE_WINDOW", ...)`,
+        chamado quando o usuário fecha a janela principal.
+
+        Encerra o `ThreadPoolExecutor` do `DownloadService` (liberando suas
+        worker threads) antes de efetivamente destruir a janela, para que
+        o fechamento da janela não deixe threads em background pendentes.
+        """
+        self.download_service.shutdown()
+        self.destroy()
 
     def refresh_history(self) -> None:
         if self.history_panel is not None:

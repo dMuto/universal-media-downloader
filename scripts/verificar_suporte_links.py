@@ -29,8 +29,8 @@ região, etc.) — ela só confirma se existe código dedicado para aquele
 site dentro do yt-dlp instalado. Para a verificação completa (que de
 fato tenta analisar e baixar), use `testar_links.py`.
 
-Uso (rodar manualmente, quando quiser):
-    python verificar_suporte_links.py
+Uso (rodar manualmente, quando quiser, a partir da raiz do repositório):
+    python scripts/verificar_suporte_links.py
 
 Este script não é chamado por nenhum outro módulo do app nem é executado
 automaticamente — só roda quando você o invoca diretamente.
@@ -46,13 +46,16 @@ import yt_dlp.extractor as yt_dlp_extractors
 
 # --- Configuração do teste ---------------------------------------------------
 
+#: Raiz do repositório (este script vive em `scripts/`, um nível abaixo).
+_REPO_ROOT = Path(__file__).parent.parent
+
 #: Arquivo com uma URL por linha (linhas vazias ou iniciadas com `#` são
 #: ignoradas, então o arquivo pode ser comentado livremente). O mesmo
 #: arquivo usado por `testar_links.py`.
-LINKS_FILE = Path(__file__).parent / "app" / "utils" / "links para teste.txt"
+LINKS_FILE = _REPO_ROOT / "app" / "utils" / "links para teste.txt"
 
 #: Pasta onde o log desta verificação é salvo.
-DOWNLOADS_DIR = Path(__file__).parent / "downloads"
+DOWNLOADS_DIR = _REPO_ROOT / "downloads"
 
 #: Arquivo de log desta verificação (um arquivo novo por execução,
 #: identificado pelo timestamp de início).
@@ -129,9 +132,7 @@ def _classify_support(matching_names: list[str]) -> str:
     Retorna uma das strings: "especifico", "generico" ou "sem_suporte".
     """
     specific_names = [
-        name
-        for name in matching_names
-        if name.lower() != _GENERIC_EXTRACTOR_NAME
+        name for name in matching_names if name.lower() != _GENERIC_EXTRACTOR_NAME
     ]
 
     if specific_names:
@@ -233,9 +234,7 @@ def main() -> None:
         for url in unsupported_links:
             _log(f"  SEM SUPORTE: {url}")
 
-    _log(
-        f"=== Verificação de suporte concluída. Log completo em: {LOG_FILE} ==="
-    )
+    _log(f"=== Verificação de suporte concluída. Log completo em: {LOG_FILE} ===")
 
 
 if __name__ == "__main__":

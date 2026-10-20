@@ -26,25 +26,25 @@ from app.models import (
 
 
 class MediaAnalysisError(Exception):
-    """Raised when a media URL cannot be analyzed."""
+    """Levantada quando uma URL de mídia não pode ser analisada."""
 
 
 class DownloadError(Exception):
-    """Raised when a media download cannot be completed."""
+    """Levantada quando um download de mídia não pode ser concluído."""
 
 
 class _DownloadCancelled(Exception):
     """
-    Internal control-flow exception used to cooperatively interrupt a
-    download when `cancel_event` is set.
+    Exceção interna de controle de fluxo usada para interromper
+    cooperativamente um download quando `cancel_event` é sinalizado.
 
-    This never escapes `Downloader.download()`: it is always caught and
-    translated into a `DownloadResult(success=False, ...)`.
+    Ela nunca escapa de `Downloader.download()`: é sempre capturada e
+    traduzida em um `DownloadResult(success=False, ...)`.
     """
 
 
 class Downloader:
-    """Provides media analysis and download through yt-dlp."""
+    """Fornece análise e download de mídia através do yt-dlp."""
 
     def __init__(
         self,
@@ -58,10 +58,11 @@ class Downloader:
 
     def analyze(self, url: str) -> MediaInfo:
         """
-        Analyze a media URL and return application-level media information.
+        Analisa uma URL de mídia e retorna as informações de mídia no
+        nível da aplicação.
 
-        This method only extracts metadata and available formats.
-        It does not download any media.
+        Este método apenas extrai metadados e formatos disponíveis.
+        Ele não baixa nenhuma mídia.
         """
         if not url or not url.strip():
             raise MediaAnalysisError("A URL não pode estar vazia.")
@@ -103,25 +104,27 @@ class Downloader:
         cancel_event: threading.Event | None = None,
     ) -> DownloadResult:
         """
-        Download the selected formats using yt-dlp.
+        Baixa os formatos selecionados usando o yt-dlp.
 
-        When video and audio are separate, they are downloaded into
-        temporary files and merged using FFmpegService.
+        Quando vídeo e áudio estão separados, eles são baixados em
+        arquivos temporários e unidos (merge) usando o FFmpegService.
 
-        When `progress_hook` is provided, it is invoked with a
-        `DownloadProgress` adapted from yt-dlp's own `progress_hooks`
-        dictionaries as the download advances. Only the fields present
-        in the underlying yt-dlp dictionary are populated; fields that
-        are absent are left as `None` rather than assuming a value.
+        Quando `progress_hook` é informado, ele é invocado com um
+        `DownloadProgress` adaptado a partir dos próprios dicionários de
+        `progress_hooks` do yt-dlp conforme o download avança. Apenas os
+        campos presentes no dicionário subjacente do yt-dlp são
+        preenchidos; campos ausentes são deixados como `None` em vez de
+        assumir um valor.
 
-        When `cancel_event` is provided, it is checked cooperatively at
-        safe points (before starting each stream download, from within
-        the yt-dlp progress hook, and before starting the merge). Once a
-        cancellation is confirmed, no final file is written/overwritten
-        in the destination directory from partial data, any temporary or
-        partial files created by the operation are removed, and a
-        `DownloadResult(success=False, ...)` describing the cancellation
-        is returned instead of raising.
+        Quando `cancel_event` é informado, ele é verificado
+        cooperativamente em pontos seguros (antes de iniciar o download
+        de cada stream, dentro do progress hook do yt-dlp, e antes de
+        iniciar o merge). Uma vez confirmado o cancelamento, nenhum
+        arquivo final é escrito/sobrescrito no diretório de destino a
+        partir de dados parciais, quaisquer arquivos temporários ou
+        parciais criados pela operação são removidos, e um
+        `DownloadResult(success=False, ...)` descrevendo o cancelamento
+        é retornado em vez de uma exceção ser levantada.
         """
         if not options.url or not options.url.strip():
             return DownloadResult(
@@ -232,7 +235,7 @@ class Downloader:
     def _build_media_info(
         info: dict[str, Any],
     ) -> MediaInfo:
-        """Convert raw yt-dlp information into a MediaInfo model."""
+        """Converte as informações brutas do yt-dlp em um modelo MediaInfo."""
         formats = [
             Downloader._build_format_info(format_data)
             for format_data in info.get("formats", [])
@@ -252,7 +255,7 @@ class Downloader:
     def _build_format_info(
         format_data: dict[str, Any],
     ) -> FormatInfo:
-        """Convert a raw yt-dlp format into a FormatInfo model."""
+        """Converte um formato bruto do yt-dlp em um modelo FormatInfo."""
         video_codec = Downloader._normalize_codec(format_data.get("vcodec"))
 
         audio_codec = Downloader._normalize_codec(format_data.get("acodec"))
@@ -277,7 +280,7 @@ class Downloader:
     def _normalize_codec(
         codec: Any,
     ) -> str | None:
-        """Normalize yt-dlp codec values."""
+        """Normaliza os valores de codec do yt-dlp."""
         if codec is None:
             return None
 
@@ -293,7 +296,7 @@ class Downloader:
         video_codec: str | None,
         audio_codec: str | None,
     ) -> MediaType:
-        """Determine media type from available codecs."""
+        """Determina o tipo de mídia a partir dos codecs disponíveis."""
         has_video = video_codec is not None
         has_audio = audio_codec is not None
 
@@ -309,7 +312,7 @@ class Downloader:
     def _is_media_format(
         format_data: dict[str, Any],
     ) -> bool:
-        """Return whether a yt-dlp format represents a media stream."""
+        """Retorna se um formato do yt-dlp representa um stream de mídia."""
         format_id = format_data.get("format_id")
 
         if format_id is None:
@@ -338,16 +341,17 @@ class Downloader:
         cancel_event: threading.Event | None = None,
     ) -> Callable[[dict[str, Any]], None]:
         """
-        Build a yt-dlp-compatible progress hook that adapts yt-dlp's raw
-        progress dictionary into a DownloadProgress before delegating to
-        the caller-supplied progress_hook.
+        Constrói um progress hook compatível com o yt-dlp que adapta o
+        dicionário bruto de progresso do yt-dlp em um DownloadProgress
+        antes de delegar ao progress_hook fornecido pelo chamador.
 
-        When `cancel_event` is set, the hook raises `_DownloadCancelled`
-        instead of delegating, which interrupts yt-dlp's in-progress
-        download cleanly (the exception propagates up through
-        `extract_info`/`download` without yt-dlp swallowing it, since
-        yt-dlp's own progress hook invocation does not catch arbitrary
-        exceptions raised by caller-supplied hooks).
+        Quando `cancel_event` está sinalizado, o hook levanta
+        `_DownloadCancelled` em vez de delegar, o que interrompe
+        limpamente o download em curso do yt-dlp (a exceção se propaga
+        através de `extract_info`/`download` sem ser engolida pelo
+        yt-dlp, já que a própria invocação do progress hook do yt-dlp
+        não captura exceções arbitrárias levantadas por hooks fornecidos
+        pelo chamador).
         """
 
         def yt_dlp_hook(raw_progress: dict[str, Any]) -> None:
@@ -365,7 +369,7 @@ class Downloader:
     def _check_cancelled(
         cancel_event: threading.Event | None,
     ) -> None:
-        """Raise `_DownloadCancelled` if `cancel_event` has been set."""
+        """Levanta `_DownloadCancelled` se `cancel_event` tiver sido sinalizado."""
         if cancel_event is not None and cancel_event.is_set():
             raise _DownloadCancelled()
 
@@ -374,12 +378,12 @@ class Downloader:
         raw_progress: dict[str, Any],
     ) -> DownloadProgress:
         """
-        Convert a raw yt-dlp progress_hooks dictionary into a
+        Converte um dicionário bruto de progress_hooks do yt-dlp em um
         DownloadProgress.
 
-        Only the fields present in `raw_progress` are populated;
-        fields absent from the source dictionary are kept as `None`,
-        without presuming a value.
+        Apenas os campos presentes em `raw_progress` são preenchidos;
+        campos ausentes no dicionário de origem são mantidos como
+        `None`, sem presumir um valor.
         """
         downloaded_bytes = raw_progress.get("downloaded_bytes")
         total_bytes = raw_progress.get("total_bytes")
@@ -406,7 +410,7 @@ class Downloader:
     def _map_progress_status(
         raw_status: Any,
     ) -> DownloadStatus:
-        """Map yt-dlp's raw progress status to DownloadStatus."""
+        """Mapeia o status bruto de progresso do yt-dlp para DownloadStatus."""
         if raw_status == "error":
             return DownloadStatus.FAILED
 
@@ -417,7 +421,7 @@ class Downloader:
         ydl: yt_dlp.YoutubeDL,
         info: dict[str, Any],
     ) -> Path | None:
-        """Determine the path of the downloaded file."""
+        """Determina o caminho do arquivo baixado."""
         requested_downloads = info.get("requested_downloads")
 
         if requested_downloads:
@@ -437,7 +441,7 @@ class Downloader:
     def _get_file_size(
         file_path: Path,
     ) -> int | None:
-        """Return the downloaded file size when available."""
+        """Retorna o tamanho do arquivo baixado, quando disponível."""
         try:
             return file_path.stat().st_size
         except OSError:
@@ -451,7 +455,7 @@ class Downloader:
         progress_hook: Callable[[DownloadProgress], None] | None = None,
         cancel_event: threading.Event | None = None,
     ) -> Path:
-        """Download a single yt-dlp format."""
+        """Baixa um único formato do yt-dlp."""
         self._check_cancelled(cancel_event)
 
         ydl_options = {
@@ -497,11 +501,13 @@ class Downloader:
         bitrate: int,
     ) -> Path:
         """
-        Convert the downloaded audio file to MP3 at the requested bitrate,
-        removing the intermediate (unconverted) audio file afterwards.
+        Converte o arquivo de áudio baixado para MP3 no bitrate
+        solicitado, removendo em seguida o arquivo de áudio intermediário
+        (não convertido).
 
-        The resulting MP3 file is written alongside the intermediate file,
-        reusing its stem and swapping the extension to `.mp3`.
+        O arquivo MP3 resultante é escrito ao lado do arquivo
+        intermediário, reaproveitando seu stem e trocando a extensão
+        para `.mp3`.
         """
         if self._ffmpeg_service is None:
             self._ffmpeg_service = FFmpegService()
@@ -524,12 +530,13 @@ class Downloader:
         file_path: Path,
     ) -> Path:
         """
-        Rename a downloaded file so its final name is sanitized, mirroring
-        the sanitization already applied to the merge path's output name.
+        Renomeia um arquivo baixado para que seu nome final seja
+        sanitizado, espelhando a sanitização já aplicada ao nome de
+        saída do caminho de merge.
 
-        The stem (filename without extension) is sanitized; the extension
-        and parent directory are preserved. When the sanitized stem is
-        identical to the original one, the file is left untouched.
+        O stem (nome do arquivo sem extensão) é sanitizado; a extensão
+        e o diretório pai são preservados. Quando o stem sanitizado é
+        idêntico ao original, o arquivo é deixado intocado.
         """
         sanitized_stem = Downloader._sanitize_filename(file_path.stem)
 
@@ -550,7 +557,7 @@ class Downloader:
         progress_hook: Callable[[DownloadProgress], None] | None = None,
         cancel_event: threading.Event | None = None,
     ) -> DownloadResult:
-        """Download separate video/audio streams and merge them."""
+        """Baixa streams separados de vídeo/áudio e faz o merge entre eles."""
         if selection.video_format is None:
             raise FFmpegError(
                 "A seleção requer merge, mas não possui formato de vídeo."
@@ -567,10 +574,11 @@ class Downloader:
         video_format = selection.video_format
         audio_format = selection.audio_format
 
-        # `TemporaryDirectory` removes `temp_directory` (and everything
-        # inside it) on exit regardless of whether the block completes
-        # normally or raises, so any partial video/audio streams created
-        # before a confirmed cancellation are cleaned up automatically.
+        # `TemporaryDirectory` remove `temp_directory` (e tudo que está
+        # dentro dele) ao sair, independentemente de o bloco terminar
+        # normalmente ou levantar uma exceção, então quaisquer streams
+        # parciais de vídeo/áudio criados antes de um cancelamento
+        # confirmado são removidos automaticamente.
         with TemporaryDirectory(
             prefix="umd_",
             dir=destination,
@@ -633,7 +641,7 @@ class Downloader:
         progress_hook: Callable[[DownloadProgress], None] | None = None,
         cancel_event: threading.Event | None = None,
     ) -> Path:
-        """Download one selected stream into a temporary directory."""
+        """Baixa um stream selecionado para um diretório temporário."""
         self._check_cancelled(cancel_event)
 
         ydl_options = {
@@ -676,9 +684,10 @@ class Downloader:
         directory: Path,
     ) -> None:
         """
-        Remove partial/temporary files (e.g. yt-dlp's `.part`/`.ytdl`
-        sidecar files) left behind in `directory` by an interrupted
-        download, without touching any other, unrelated file.
+        Remove arquivos parciais/temporários (por exemplo, os arquivos
+        auxiliares `.part`/`.ytdl` do yt-dlp) deixados em `directory` por
+        um download interrompido, sem tocar em nenhum outro arquivo não
+        relacionado.
         """
         for pattern in ("*.part", "*.ytdl"):
             for partial_file in directory.glob(pattern):
@@ -693,8 +702,8 @@ class Downloader:
         video_extension: str | None,
     ) -> str:
         """
-        Select a container that can preserve the selected streams
-        without unnecessary transcoding.
+        Seleciona um contêiner capaz de preservar os streams
+        selecionados sem transcodificação desnecessária.
         """
         audio_codec = (audio_codec or "").lower()
         video_extension = (video_extension or "").lower()
@@ -708,7 +717,31 @@ class Downloader:
     def _sanitize_filename(
         filename: str,
     ) -> str:
-        """Remove Windows-invalid filename characters."""
+        """
+        Remove caracteres inválidos para nomes de arquivo no Windows.
+
+        Garantia contra path traversal: como `/` e `\\` fazem parte do
+        conjunto de caracteres inválidos substituídos abaixo, o valor
+        retornado é sempre um único segmento de caminho e nunca pode
+        conter um separador de diretório. Isso também impede que o
+        resultado codifique um caminho absoluto (POSIX `/etc/passwd`,
+        Windows `C:\\...`) ou um caminho UNC (`\\\\servidor\\share\\...`),
+        já que todos esses formatos dependem de separadores que são
+        removidos.
+
+        O único caso remanescente é um resultado que se reduz a `..` ou
+        a uma sequência de pontos (por exemplo, uma entrada `"..."` ou
+        `"../"` após a substituição dos separadores). O laço de remoção
+        de pontos/espaços finais abaixo reduz qualquer um desses valores
+        a uma string vazia, que então recai no nome padrão `"media"` em
+        vez de uma referência ao diretório pai.
+
+        Como consequência, para qualquer entrada, juntar o nome
+        retornado a um diretório de destino (ex.: `destino /
+        nome_sanitizado`) sempre resolve para um caminho dentro desse
+        diretório — nunca é possível escapar dele via segmentos `..`,
+        caminhos absolutos ou caminhos UNC.
+        """
         invalid_characters = '<>:"/\\|?*'
 
         sanitized = "".join(

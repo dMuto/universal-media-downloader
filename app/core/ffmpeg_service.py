@@ -6,25 +6,25 @@ from pathlib import Path
 
 
 class FFmpegError(Exception):
-    """Raised when an FFmpeg operation cannot be completed."""
+    """Levantada quando uma operação do FFmpeg não pode ser concluída."""
 
 
 SUPPORTED_MP3_BITRATES: frozenset[int] = frozenset({128, 192, 256, 320})
 
 
 class FFmpegService:
-    """Provides a small interface for FFmpeg operations."""
+    """Fornece uma pequena interface para operações do FFmpeg."""
 
     def __init__(self, ffmpeg_path: Path | str | None = None) -> None:
         self._ffmpeg_path = self._resolve_ffmpeg_path(ffmpeg_path)
 
     @property
     def executable(self) -> Path:
-        """Return the resolved FFmpeg executable path."""
+        """Retorna o caminho resolvido do executável do FFmpeg."""
         return self._ffmpeg_path
 
     def is_available(self) -> bool:
-        """Return whether FFmpeg is available."""
+        """Retorna se o FFmpeg está disponível."""
         return self._ffmpeg_path.is_file()
 
     def merge(
@@ -34,7 +34,7 @@ class FFmpegService:
         output_path: Path,
     ) -> Path:
         """
-        Merge video and audio without re-encoding when possible.
+        Faz o merge de vídeo e áudio sem recodificação quando possível.
         """
         video_path = Path(video_path)
         audio_path = Path(audio_path)
@@ -171,7 +171,8 @@ class FFmpegService:
         ffmpeg_path: Path | str | None,
     ) -> Path:
         """
-        Resolve FFmpeg from an explicit path or the system PATH.
+        Resolve o FFmpeg a partir de um caminho explícito ou do PATH do
+        sistema.
         """
         if ffmpeg_path is not None:
             path = Path(ffmpeg_path)
@@ -193,6 +194,6 @@ class FFmpegService:
         file_path: Path,
         description: str,
     ) -> None:
-        """Validate an input media file."""
+        """Valida um arquivo de mídia de entrada."""
         if not file_path.is_file():
             raise FFmpegError(f"O arquivo de {description} não existe: {file_path}")

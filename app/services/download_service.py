@@ -87,20 +87,35 @@ class DownloadService:
         history_service: HistoryService | None = None,
         log_service: LogService | None = None,
     ) -> None:
-        self._downloader = downloader if downloader is not None else Downloader()
-        self._format_selector = (
-            format_selector if format_selector is not None else FormatSelector()
+        # `FFmpegService()` (sem caminho explícito) levanta `FFmpegError`
+        # imediatamente quando o FFmpeg não está disponível no PATH. Por
+        # isso, quando nenhum `ffmpeg_service` é injetado, a resolução é
+        # repassada ao `Downloader` default (que já constrói sua própria
+        # `FFmpegService` de forma lazy, somente quando um Merge ou uma
+        # Conversão_Para_MP3 é de fato solicitada) em vez de ser feita
+        # aqui. Isso evita que a simples criação do `DownloadService` (e,
+        # portanto, a inicialização do aplicativo) falhe quando o FFmpeg
+        # não está instalado — o usuário só é informado, com uma mensagem
+        # amigável, se e quando tentar uma operação que de fato precise
+        # dele (Requisito 16.4).
+        self._ffmpeg_service = ffmpeg_service
+        self._downloader = (
+            downloader
+            if downloader is not None
+            else Downloader(ffmpeg_service=self._ffmpeg_service)
         )
-        self._ffmpeg_service = (
-            ffmpeg_service if ffmpeg_service is not None else FFmpegService()
-        )
+        self._format_selector = format_selector if format_selector is not None else FormatSelector()
+        self._log_service = log_service if log_service is not None else LogService()
         self._config_service = (
-            config_service if config_service is not None else ConfigService()
+            config_service
+            if config_service is not None
+            else ConfigService(log_service=self._log_service)
         )
         self._history_service = (
-            history_service if history_service is not None else HistoryService()
+            history_service
+            if history_service is not None
+            else HistoryService(log_service=self._log_service)
         )
-        self._log_service = log_service if log_service is not None else LogService()
 
         # Rastreamento interno de operações em curso/concluídas, protegido
         # por `_operations_lock` pois `get_progress`/`cancel` são chamados
@@ -127,6 +142,26 @@ class DownloadService:
         with self._operations_lock:
             operation_state = self._operations.get(operation_id)
             return operation_state.progress if operation_state is not None else None
+
+    def shutdown(self, wait: bool = True) -> None:
+        """Encerra o `ThreadPoolExecutor` interno, liberando suas worker
+        threads.
+
+        Após esta chamada, novas submissões a `analyze`/`start_download`
+        (que internamente chamam `self._executor.submit`) levantam
+        `RuntimeError`, conforme o comportamento padrão de
+        `concurrent.futures.ThreadPoolExecutor.shutdown`.
+
+        Quando `wait=True` (padrão), este método bloqueia até que todas as
+        operações já submetidas (em curso ou pendentes) terminem antes de
+        retornar. Quando `wait=False`, o encerramento é sinalizado
+        imediatamente, sem esperar pelas operações em curso.
+
+        Deve ser chamado ao finalizar a aplicação (ex.: ao fechar a janela
+        principal da GUI) para evitar que worker threads fiquem
+        pendentes/zumbis após o encerramento.
+        """
+        self._executor.shutdown(wait=wait)
 
     def get_log_path(self) -> Path:
         """Retorna o caminho do arquivo `.txt` onde o log completo do
@@ -156,9 +191,7 @@ class DownloadService:
                 return
             operation_state.cancel_event.set()
 
-        self._log_service.write(
-            f"[{operation_id}] Cancelamento solicitado pelo usuário."
-        )
+        self._log_service.write(f"[{operation_id}] Cancelamento solicitado pelo usuário.")
 
     def analyze(
         self,
@@ -254,10 +287,7 @@ class DownloadService:
             overrides["download_type"] = config.default_download_type
 
         effective_download_type = overrides.get("download_type", options.download_type)
-        if (
-            options.audio_bitrate is None
-            and effective_download_type == DownloadType.AUDIO
-        ):
+        if options.audio_bitrate is None and effective_download_type == DownloadType.AUDIO:
             overrides["audio_bitrate"] = config.default_audio_bitrate
 
         if not overrides:
@@ -367,9 +397,7 @@ class DownloadService:
                     title=media.title,
                     download_type=effective_options.download_type,
                     status=status,
-                    file_path=result.file_path
-                    if status == DownloadStatus.COMPLETED
-                    else None,
+                    file_path=result.file_path if status == DownloadStatus.COMPLETED else None,
                     timestamp=datetime.now(),
                     error_message=result.error_message
                     if status != DownloadStatus.COMPLETED
@@ -432,8 +460,8 @@ class DownloadService:
 
         future = self._executor.submit(_run_download)
         with self._operations_lock:
-            operation_state = self._operations.get(operation_id)
-            if operation_state is not None:
-                operation_state.future = future
+            current_state = self._operations.get(operation_id)
+            if current_state is not None:
+                current_state.future = future
 
         return DownloadHandle(operation_id=operation_id)

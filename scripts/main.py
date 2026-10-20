@@ -15,7 +15,7 @@ def main() -> None:
         print("\nAnalisando mídia...")
 
         media = downloader.analyze(url)
-        
+
         print("\nFormatos disponíveis:")
 
         for format_info in media.formats:

@@ -1,8 +1,4 @@
 from __future__ import annotations
-from pathlib import Path
-from tempfile import TemporaryDirectory
-
-from app.core.ffmpeg_service import FFmpegError, FFmpegService
 
 from app.models import (
     DownloadOptions,
@@ -15,11 +11,11 @@ from app.models import (
 
 
 class FormatSelectionError(Exception):
-    """Raised when a suitable format cannot be selected."""
+    """Levantada quando não é possível selecionar um formato adequado."""
 
 
 class FormatSelector:
-    """Selects media formats based on download options."""
+    """Seleciona formatos de mídia com base nas opções de download."""
 
     def select(
         self,
@@ -27,10 +23,10 @@ class FormatSelector:
         options: DownloadOptions,
     ) -> FormatSelection:
         """
-        Select suitable formats for the requested download.
+        Seleciona os formatos adequados para o download solicitado.
 
-        This method only selects formats. It does not download,
-        merge, convert, or modify any media.
+        Este método apenas seleciona formatos. Ele não baixa, faz
+        merge, converte nem modifica nenhuma mídia.
         """
         if not media.formats:
             raise FormatSelectionError(
@@ -38,9 +34,7 @@ class FormatSelector:
             )
 
         if not options.url.strip():
-            raise FormatSelectionError(
-                "A URL do download não pode estar vazia."
-            )
+            raise FormatSelectionError("A URL do download não pode estar vazia.")
 
         if options.download_type == DownloadType.VIDEO:
             return self._select_video(media.formats, options)
@@ -57,17 +51,13 @@ class FormatSelector:
         formats: list[FormatInfo],
         options: DownloadOptions,
     ) -> FormatSelection:
-        """Select a video format and, if necessary, a separate audio format."""
+        """Seleciona um formato de vídeo e, se necessário, um formato de áudio separado."""
         video_formats = [
-            format_info
-            for format_info in formats
-            if format_info.has_video
+            format_info for format_info in formats if format_info.has_video
         ]
 
         if not video_formats:
-            raise FormatSelectionError(
-                "Nenhum formato de vídeo está disponível."
-            )
+            raise FormatSelectionError("Nenhum formato de vídeo está disponível.")
 
         candidates = self._filter_by_max_height(
             video_formats,
@@ -118,7 +108,7 @@ class FormatSelector:
         self,
         formats: list[FormatInfo],
     ) -> FormatSelection:
-        """Select the best audio-only format."""
+        """Seleciona o melhor formato exclusivamente de áudio."""
         audio_formats = [
             format_info
             for format_info in formats
@@ -126,9 +116,7 @@ class FormatSelector:
         ]
 
         if not audio_formats:
-            raise FormatSelectionError(
-                "Nenhum formato de áudio está disponível."
-            )
+            raise FormatSelectionError("Nenhum formato de áudio está disponível.")
 
         selected_audio = max(
             audio_formats,
@@ -142,15 +130,14 @@ class FormatSelector:
         formats: list[FormatInfo],
         max_height: int | None,
     ) -> list[FormatInfo]:
-        """Keep formats that do not exceed the requested height."""
+        """Mantém os formatos que não excedem a altura solicitada."""
         if max_height is None:
             return formats
 
         return [
             format_info
             for format_info in formats
-            if format_info.height is not None
-            and format_info.height <= max_height
+            if format_info.height is not None and format_info.height <= max_height
         ]
 
     @staticmethod
@@ -158,21 +145,19 @@ class FormatSelector:
         format_info: FormatInfo,
     ) -> tuple[int, int, float, int]:
         """
-        Score a video format.
+        Pontua um formato de vídeo.
 
-        Priority:
-        1. resolution
-        2. video + audio
+        Prioridade:
+        1. resolução
+        2. vídeo + áudio
         3. bitrate
-        4. MP4 preference
+        4. preferência por MP4
         """
         height = format_info.height or 0
         has_audio = int(format_info.has_audio)
         bitrate = format_info.bitrate or 0
 
-        mp4_preference = int(
-            (format_info.extension or "").lower() == "mp4"
-        )
+        mp4_preference = int((format_info.extension or "").lower() == "mp4")
 
         return (
             height,
@@ -186,11 +171,11 @@ class FormatSelector:
         format_info: FormatInfo,
     ) -> tuple[float, int]:
         """
-        Score an audio format.
+        Pontua um formato de áudio.
 
-        Priority:
+        Prioridade:
         1. bitrate
-        2. common MP4-family audio format
+        2. formato de áudio comum da família MP4
         """
         bitrate = format_info.bitrate or 0
 

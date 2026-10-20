@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -11,10 +12,9 @@ from hypothesis import strategies as st
 from app.models import DownloadStatus, DownloadType
 from app.models.history import HistoryEntry
 from app.services.history_service import HistoryService
+from app.services.log_service import LogService
 
-_url_strategy = st.text(min_size=1, max_size=50).map(
-    lambda suffix: f"https://example.com/{suffix}"
-)
+_url_strategy = st.text(min_size=1, max_size=50).map(lambda suffix: f"https://example.com/{suffix}")
 
 _optional_title_strategy = st.one_of(st.none(), st.text(max_size=50))
 
@@ -162,3 +162,65 @@ def test_history_entry_with_missing_file_reports_file_exists_false(
     matching = [stored for stored in entries if stored.url == entry.url]
     assert len(matching) == 1
     assert matching[0].file_exists is False
+
+
+def test_concurrent_add_entry_does_not_lose_entries(tmp_path: Path) -> None:
+    """Múltiplas threads chamando `add_entry` simultaneamente não devem
+    perder entradas: a sequência load -> modify -> save deve ser protegida
+    por um lock de instância contra condições de corrida."""
+    history_path = tmp_path / "history.json"
+    service = HistoryService(history_path=history_path)
+
+    thread_count = 20
+
+    def make_entry(index: int) -> HistoryEntry:
+        return HistoryEntry(
+            url=f"https://example.com/concurrent-{index}",
+            title=f"Video {index}",
+            download_type=DownloadType.VIDEO,
+            status=DownloadStatus.COMPLETED,
+            file_path=None,
+            timestamp=datetime(2023, 1, 1, 12, 0, 0),
+            error_message=None,
+        )
+
+    def worker(index: int) -> None:
+        service.add_entry(make_entry(index))
+
+    threads = [threading.Thread(target=worker, args=(index,)) for index in range(thread_count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    entries = service.list_entries()
+    urls = {entry.url for entry in entries}
+    expected_urls = {f"https://example.com/concurrent-{index}" for index in range(thread_count)}
+
+    assert len(entries) == thread_count
+    assert urls == expected_urls
+
+
+def test_load_entries_logs_exception_type_and_path_on_corrupted_file(
+    tmp_path: Path,
+) -> None:
+    """`HistoryService._load_entries` SHALL log the exception type and the
+    affected file path when the history file cannot be read/parsed, while
+    still returning an empty list instead of raising.
+
+    Validates: Requirements (tarefa 25 - logging em tratamentos de exceção)
+    """
+    history_path = tmp_path / "history.json"
+    history_path.write_text("{not valid json", encoding="utf-8")
+
+    log_path = tmp_path / "log.txt"
+    log_service = LogService(log_path=log_path)
+
+    service = HistoryService(history_path=history_path, log_service=log_service)
+    entries = service.list_entries()
+
+    assert entries == []
+
+    log_contents = log_path.read_text(encoding="utf-8")
+    assert str(history_path) in log_contents
+    assert "JSONDecodeError" in log_contents

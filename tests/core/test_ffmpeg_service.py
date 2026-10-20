@@ -29,9 +29,7 @@ _filename_strategy = st.text(
     ),
     min_size=1,
     max_size=12,
-).filter(
-    lambda name: name.strip() != "" and name.lower() not in _RESERVED_WINDOWS_NAMES
-)
+).filter(lambda name: name.strip() != "" and name.lower() not in _RESERVED_WINDOWS_NAMES)
 
 
 @settings(
@@ -113,6 +111,17 @@ def test_merge_never_invokes_ffmpeg_when_input_files_are_missing(
 
     video_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # `tmp_path` is reused across every Hypothesis example in this test
+    # (necessary since it is a function-scoped fixture; see
+    # `suppress_health_check` above), but `video_name`/`audio_name` may
+    # repeat across examples. Explicitly remove any leftover file from a
+    # previous example before (re)creating the state for this one, so an
+    # example that expects a path to be missing never observes a file
+    # left behind by an earlier example that happened to use the same
+    # generated name.
+    video_path.unlink(missing_ok=True)
+    audio_path.unlink(missing_ok=True)
+
     if missing == "video":
         audio_path.write_bytes(b"")
     elif missing == "audio":
@@ -150,9 +159,7 @@ def test_ffmpeg_service_falls_back_to_system_path_when_no_explicit_path(
     fake_ffmpeg = tmp_path / "ffmpeg"
     fake_ffmpeg.write_bytes(b"")
 
-    with patch(
-        "app.core.ffmpeg_service.shutil.which", return_value=str(fake_ffmpeg)
-    ) as mock_which:
+    with patch("app.core.ffmpeg_service.shutil.which", return_value=str(fake_ffmpeg)) as mock_which:
         service = FFmpegService()
 
     mock_which.assert_called_once_with("ffmpeg")
@@ -213,14 +220,10 @@ def test_merge_raises_error_when_output_file_missing_after_success(
 
     service = FFmpegService(ffmpeg_path=fake_ffmpeg)
 
-    success_but_no_output = subprocess.CompletedProcess(
-        args=[], returncode=0, stdout="", stderr=""
-    )
+    success_but_no_output = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
     with (
-        patch(
-            "app.core.ffmpeg_service.subprocess.run", return_value=success_but_no_output
-        ),
+        patch("app.core.ffmpeg_service.subprocess.run", return_value=success_but_no_output),
         pytest.raises(FFmpegError) as exc_info,
     ):
         service.merge(video_path, audio_path, output_path)

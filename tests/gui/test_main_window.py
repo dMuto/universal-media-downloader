@@ -20,6 +20,7 @@ used in `tests/gui/test_download_panel.py`.
 """
 
 import threading
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -35,7 +36,7 @@ class _FakeDownloadService:
 
 @pytest.fixture
 def main_window(tmp_path):
-    customtkinter = pytest.importorskip("customtkinter")
+    pytest.importorskip("customtkinter")
 
     try:
         window = MainWindow(
@@ -154,3 +155,30 @@ def test_poll_operations_reschedules_itself_via_after(main_window, monkeypatch):
     ms, callback = after_calls[0]
     assert ms == main_window._poll_interval_ms
     assert callback == main_window._poll_operations
+
+
+def test_closing_window_calls_download_service_shutdown(tmp_path):
+    """Fechar a janela principal (via o handler registrado em
+    `protocol("WM_DELETE_WINDOW", ...)`) deve chamar
+    `DownloadService.shutdown()` antes de destruir a janela, garantindo
+    que o `ThreadPoolExecutor` interno seja encerrado em vez de deixar
+    worker threads pendentes.
+    """
+    pytest.importorskip("customtkinter")
+
+    fake_download_service = MagicMock()
+
+    try:
+        window = MainWindow(
+            download_service=fake_download_service,
+            config_service=ConfigService(config_path=tmp_path / "config.json"),
+            history_service=HistoryService(history_path=tmp_path / "history.json"),
+            auto_poll=False,
+        )
+    except Exception as exc:  # pragma: no cover - depends on the environment
+        pytest.skip(f"No display available for CustomTkinter: {exc}")
+        return
+
+    window._on_close()
+
+    fake_download_service.shutdown.assert_called_once_with()

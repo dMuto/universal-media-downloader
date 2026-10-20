@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.models.config import AppConfig
 from app.models.download import DownloadType
+from app.services.log_service import LogService
 
 _APP_DIR_NAME = "UniversalMediaDownloader"
 _CONFIG_FILE_NAME = "config.json"
@@ -27,8 +28,13 @@ class ConfigService:
     """Carrega e persiste AppConfig em um arquivo JSON no diretório de
     configuração do usuário (ex.: %APPDATA%/UniversalMediaDownloader)."""
 
-    def __init__(self, config_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        config_path: Path | None = None,
+        log_service: LogService | None = None,
+    ) -> None:
         self._config_path = Path(config_path) if config_path is not None else _default_config_path()
+        self._log_service = log_service if log_service is not None else LogService()
 
     @property
     def config_path(self) -> Path:
@@ -45,7 +51,12 @@ class ConfigService:
             raw_text = self._config_path.read_text(encoding="utf-8")
             data = json.loads(raw_text)
             return self._parse_config(data)
-        except Exception:
+        except Exception as exc:
+            self._log_service.write(
+                "ConfigService.load falhou ao ler/interpretar o arquivo de "
+                f"configuração em {self._config_path}. Usando valores "
+                f"padrão. Tipo da exceção: {type(exc).__name__}. Detalhe: {exc!r}"
+            )
             return AppConfig()
 
     def save(self, config: AppConfig) -> None:
@@ -65,9 +76,7 @@ class ConfigService:
             "default_download_type": config.default_download_type.value,
             "preferred_resolution": config.preferred_resolution,
             "default_audio_bitrate": config.default_audio_bitrate,
-            "ffmpeg_path": (
-                str(config.ffmpeg_path) if config.ffmpeg_path is not None else None
-            ),
+            "ffmpeg_path": (str(config.ffmpeg_path) if config.ffmpeg_path is not None else None),
             "theme": config.theme,
         }
 

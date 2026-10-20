@@ -16,6 +16,7 @@ from app.core.ffmpeg_service import FFmpegService
 from app.models.config import AppConfig
 from app.models.download import DownloadType
 from app.services.config_service import ConfigService
+from app.services.log_service import LogService
 
 
 def _app_configs() -> st.SearchStrategy[AppConfig]:
@@ -51,13 +52,9 @@ def _app_configs() -> st.SearchStrategy[AppConfig]:
             lambda parts: Path(*parts) if parts else Path("Downloads")
         ),
         default_download_type=st.sampled_from(list(DownloadType)),
-        preferred_resolution=st.one_of(
-            st.none(), st.integers(min_value=144, max_value=4320)
-        ),
+        preferred_resolution=st.one_of(st.none(), st.integers(min_value=144, max_value=4320)),
         default_audio_bitrate=st.integers(min_value=32, max_value=320),
-        ffmpeg_path=ffmpeg_path_names.map(
-            lambda name: Path(name) if name is not None else None
-        ),
+        ffmpeg_path=ffmpeg_path_names.map(lambda name: Path(name) if name is not None else None),
         theme=st.sampled_from(["system", "light", "dark"]),
     )
 
@@ -204,12 +201,36 @@ def test_ffmpeg_service_uses_configured_path_instead_of_system_path(
     config = AppConfig(ffmpeg_path=fake_ffmpeg)
 
     def _fail_if_called(name: str) -> None:
-        raise AssertionError(
-            "shutil.which should not be called when ffmpeg_path is explicit"
-        )
+        raise AssertionError("shutil.which should not be called when ffmpeg_path is explicit")
 
     monkeypatch.setattr("shutil.which", _fail_if_called)
 
     service = FFmpegService(ffmpeg_path=config.ffmpeg_path)
 
     assert service.executable == config.ffmpeg_path.resolve()
+
+
+def test_config_load_logs_exception_type_and_path_on_corrupted_file(
+    tmp_path: Path,
+) -> None:
+    """`ConfigService.load` SHALL log the exception type and the affected
+    file path when the configuration file cannot be read/parsed, while
+    still returning default values instead of raising.
+
+    Validates: Requirements (tarefa 25 - logging em tratamentos de exceção)
+    """
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{not valid json", encoding="utf-8")
+
+    log_path = tmp_path / "log.txt"
+    log_service = LogService(log_path=log_path)
+
+    service = ConfigService(config_path=config_path, log_service=log_service)
+    loaded = service.load()
+
+    assert loaded == AppConfig()
+
+    log_contents = log_path.read_text(encoding="utf-8")
+    assert str(config_path) in log_contents
+    assert "JSONDecodeError" in log_contents

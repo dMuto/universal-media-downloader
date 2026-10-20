@@ -39,12 +39,17 @@ or `FFmpegService` directly.
 **Validates: Requirements 12.3, 12.4, 12.5, 12.6, 12.7**
 """
 
-from dataclasses import dataclass, field
-from typing import Callable, Optional
+from collections.abc import Callable
+from dataclasses import dataclass
 from uuid import UUID, uuid4
 
 import pytest
 
+# These imports are the actual target of this RED-phase test: neither
+# module exists yet, so collecting this file MUST fail with an
+# ImportError (ModuleNotFoundError) until task 17 is implemented.
+from app.gui.download_panel import DownloadPanel
+from app.gui.progress_widget import ProgressWidget
 from app.models import (
     DownloadOptions,
     DownloadProgress,
@@ -53,12 +58,6 @@ from app.models import (
     DownloadType,
     MediaInfo,
 )
-
-# These imports are the actual target of this RED-phase test: neither
-# module exists yet, so collecting this file MUST fail with an
-# ImportError (ModuleNotFoundError) until task 17 is implemented.
-from app.gui.download_panel import DownloadPanel
-from app.gui.progress_widget import ProgressWidget
 
 
 @dataclass(frozen=True)
@@ -83,11 +82,11 @@ class FakeDownloadService:
         self.cancel_calls: list[UUID] = []
 
         self._operation_id = uuid4()
-        self._analyze_on_complete: Optional[
-            Callable[[Optional[MediaInfo], Optional[str]], None]
-        ] = None
-        self._download_on_progress: Optional[Callable[[DownloadProgress], None]] = None
-        self._download_on_complete: Optional[Callable[[DownloadResult], None]] = None
+        self._analyze_on_complete: (
+            Callable[[MediaInfo | None, str | None], None] | None
+        ) = None
+        self._download_on_progress: Callable[[DownloadProgress], None] | None = None
+        self._download_on_complete: Callable[[DownloadResult], None] | None = None
 
     def analyze(self, url, on_complete=None) -> FakeDownloadHandle:
         self.analyze_calls.append(url)
@@ -157,7 +156,9 @@ def download_panel(tk_root, fake_download_service):
     return DownloadPanel(tk_root, fake_download_service)
 
 
-def test_analyze_displays_metadata_on_success(download_panel, fake_download_service, make_media_info):
+def test_analyze_displays_metadata_on_success(
+    download_panel, fake_download_service, make_media_info
+):
     """12.3: after a successful analysis, title/uploader/thumbnail are shown."""
 
     media = make_media_info(
@@ -178,19 +179,25 @@ def test_analyze_displays_metadata_on_success(download_panel, fake_download_serv
     assert media.thumbnail in download_panel.thumbnail_text
 
 
-def test_analyze_displays_error_message_on_failure(download_panel, fake_download_service):
+def test_analyze_displays_error_message_on_failure(
+    download_panel, fake_download_service
+):
     """12.7: an analysis failure surfaces only the error message, no traceback."""
 
     download_panel.url_var.set("https://example.com/broken")
     download_panel.on_analyze()
 
-    fake_download_service.simulate_analyze_complete(media=None, error="Falha ao analisar a URL")
+    fake_download_service.simulate_analyze_complete(
+        media=None, error="Falha ao analisar a URL"
+    )
 
     assert download_panel.error_text == "Falha ao analisar a URL"
     assert "Traceback" not in download_panel.error_text
 
 
-def test_download_options_reflect_video_selection(download_panel, fake_download_service, make_media_info, downloads_dir):
+def test_download_options_reflect_video_selection(
+    download_panel, fake_download_service, make_media_info, downloads_dir
+):
     """12.4: selected download type/max height/destination reach `DownloadOptions`."""
 
     media = make_media_info()
@@ -213,7 +220,9 @@ def test_download_options_reflect_video_selection(download_panel, fake_download_
     assert str(sent_options.destination) == str(downloads_dir)
 
 
-def test_download_options_reflect_audio_selection(download_panel, fake_download_service, make_media_info, downloads_dir):
+def test_download_options_reflect_audio_selection(
+    download_panel, fake_download_service, make_media_info, downloads_dir
+):
     """12.4: selected audio bitrate reaches `DownloadOptions` when type is audio."""
 
     media = make_media_info()
@@ -247,7 +256,9 @@ def test_progress_widget_updates_from_synthetic_progress(tk_root):
     assert DownloadStatus.DOWNLOADING.value in progress_widget.status_text.lower()
 
 
-def test_download_panel_forwards_service_progress_to_widget(download_panel, fake_download_service, make_media_info, downloads_dir):
+def test_download_panel_forwards_service_progress_to_widget(
+    download_panel, fake_download_service, make_media_info, downloads_dir
+):
     """12.5: progress reported by the service updates the panel's `ProgressWidget`."""
 
     media = make_media_info()
@@ -267,7 +278,9 @@ def test_download_panel_forwards_service_progress_to_widget(download_panel, fake
     assert "55" in download_panel.progress_widget.percentage_text
 
 
-def test_cancel_button_calls_service_cancel(download_panel, fake_download_service, make_media_info, downloads_dir):
+def test_cancel_button_calls_service_cancel(
+    download_panel, fake_download_service, make_media_info, downloads_dir
+):
     """12.6: triggering cancel invokes `DownloadService.cancel` for the active operation."""
 
     media = make_media_info()
@@ -282,10 +295,14 @@ def test_cancel_button_calls_service_cancel(download_panel, fake_download_servic
 
     download_panel.on_cancel()
 
-    assert fake_download_service.cancel_calls == [fake_download_service.current_operation_id]
+    assert fake_download_service.cancel_calls == [
+        fake_download_service.current_operation_id
+    ]
 
 
-def test_download_panel_displays_error_message_on_download_failure(download_panel, fake_download_service, make_media_info, downloads_dir):
+def test_download_panel_displays_error_message_on_download_failure(
+    download_panel, fake_download_service, make_media_info, downloads_dir
+):
     """12.7: a failed `DownloadResult` surfaces only `error_message`, no traceback."""
 
     media = make_media_info()

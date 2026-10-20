@@ -54,7 +54,7 @@ source .venv/bin/activate
 Instale as dependências de runtime:
 
 ```bash
-pip install yt-dlp customtkinter
+pip install -r requirements.txt
 ```
 
 Para desenvolvimento (testes e empacotamento), instale também:
@@ -74,7 +74,7 @@ python run_gui.py
 ### CLI (script de linha de comando original, útil para depuração rápida do Core)
 
 ```bash
-python main.py
+python scripts/main.py
 ```
 
 ## Testes

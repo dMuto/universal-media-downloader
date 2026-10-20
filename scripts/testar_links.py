@@ -10,8 +10,8 @@ Cada link é tratado de forma independente: uma falha de análise, seleção
 de formato ou download em um link nunca interrompe o teste dos links
 seguintes.
 
-Uso (rodar manualmente, quando quiser):
-    python testar_links.py
+Uso (rodar manualmente, quando quiser, a partir da raiz do repositório):
+    python scripts/testar_links.py
 
 Este script não é chamado por nenhum outro módulo do app nem é executado
 automaticamente — só roda quando você o invoca diretamente.
@@ -30,12 +30,15 @@ from app.models import DownloadOptions, DownloadType
 
 # --- Configuração do teste ---------------------------------------------------
 
+#: Raiz do repositório (este script vive em `scripts/`, um nível abaixo).
+_REPO_ROOT = Path(__file__).parent.parent
+
 #: Arquivo com uma URL por linha (linhas vazias ou iniciadas com `#` são
 #: ignoradas, então o arquivo pode ser comentado livremente).
-LINKS_FILE = Path(__file__).parent / "app" / "utils" / "links para teste.txt"
+LINKS_FILE = _REPO_ROOT / "app" / "utils" / "links para teste.txt"
 
 #: Pasta onde os vídeos baixados com sucesso são salvos.
-DOWNLOADS_DIR = Path(__file__).parent / "downloads"
+DOWNLOADS_DIR = _REPO_ROOT / "downloads"
 
 #: Arquivo de log deste teste (um arquivo novo por execução, identificado
 #: pelo timestamp de início, para não sobrescrever logs de execuções

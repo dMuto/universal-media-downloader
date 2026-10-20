@@ -34,6 +34,19 @@ em tempo de execução, não do empacotamento.
 
 Compatibilidade (Requisito 16.1): este build assume Python 3.11+, a mesma
 versão mínima suportada pelo aplicativo.
+
+Metadados do executável (ícone e version-info)
+-----------------------------------------------
+O executável gerado inclui metadados padrão do Windows (ícone exibido no
+Explorer/barra de tarefas e as informações da aba "Detalhes" das
+propriedades do arquivo), configurados via `icon=`/`version=` em `EXE(...)`:
+
+- `assets/icon.ico`: ícone do aplicativo (placeholder; gerado por
+  `scripts/generate_icon.py`, sem dependências externas).
+- `version_info.txt`: arquivo de version-info no formato de
+  `PyInstaller.utils.win32.versioninfo` (nome do produto, versão, empresa,
+  descrição), lido automaticamente pelo PyInstaller a partir do caminho
+  informado em `version=`.
 """
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
@@ -98,4 +111,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon="assets/icon.ico",
+    version="version_info.txt",
 )

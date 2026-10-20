@@ -1,0 +1,44 @@
+# UTF-8
+#
+# Arquivo de version-info do PyInstaller para o executável Windows do
+# Universal Media Downloader, no formato lido por
+# `PyInstaller.utils.win32.versioninfo.VSVersionInfo.load`/`EXE(version=...)`.
+#
+# Referenciado por `media_downloader.spec` (parâmetro `version=` de
+# `EXE(...)`). Gerado manualmente (não via `pyi-grab_version`), seguindo a
+# mesma estrutura que esse utilitário produziria.
+
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    # filevers e prodvers devem ser tuplas de 4 itens: (Major, Minor, Patch, Build)
+    filevers=(1, 0, 0, 0),
+    prodvers=(1, 0, 0, 0),
+    # Máscara de bits conforme a documentação do VFFINFO do Windows
+    mask=0x3F,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0),
+  ),
+  kids=[
+    StringFileInfo(
+      [
+        StringTable(
+          "040904B0",
+          [
+            StringStruct("CompanyName", "Universal Media Downloader Project"),
+            StringStruct("FileDescription", "Universal Media Downloader"),
+            StringStruct("FileVersion", "1.0.0.0"),
+            StringStruct("InternalName", "UniversalMediaDownloader"),
+            StringStruct("LegalCopyright", "Copyright (c) Universal Media Downloader Project"),
+            StringStruct("OriginalFilename", "UniversalMediaDownloader.exe"),
+            StringStruct("ProductName", "Universal Media Downloader"),
+            StringStruct("ProductVersion", "1.0.0.0"),
+          ],
+        )
+      ]
+    ),
+    VarFileInfo([VarStruct("Translation", [1033, 1200])]),
+  ],
+)

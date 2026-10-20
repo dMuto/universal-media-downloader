@@ -1,5 +1,4 @@
 from datetime import datetime
-from pathlib import Path
 
 from app.models import DownloadStatus, DownloadType
 from app.models.history import HistoryEntry

@@ -18,6 +18,7 @@ from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
 import yt_dlp
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
@@ -1370,3 +1371,99 @@ def test_default_audio_bitrate_applied_when_not_informed(
         f"valor padrão 256 vindo de ConfigService.load(), mas obteve "
         f"{called_options.audio_bitrate!r}."
     )
+
+
+def test_shutdown_rejects_new_submissions_and_waits_for_in_flight_operation(
+    tmp_path: Path,
+    make_media_info,
+) -> None:
+    """`DownloadService.shutdown()` encerra o `ThreadPoolExecutor` interno.
+
+    Após `shutdown(wait=True)`: (a) a chamada só retorna depois que a
+    operação já submetida antes dela termina (comprovado aqui pelo
+    `on_complete` já ter sido entregue no momento em que `shutdown()`
+    retorna); e (b) novas submissões (`analyze`/`start_download`, que
+    delegam a `self._executor.submit`) deixam de ser aceitas, levantando
+    `RuntimeError`, conforme o comportamento padrão de
+    `concurrent.futures.ThreadPoolExecutor` após `shutdown()`.
+    """
+    media = make_media_info()
+    options = make_download_options(tmp_path)
+
+    fake_format_selector = make_fake_format_selector()
+    fake_downloader = make_fake_downloader()
+    fake_ffmpeg_service = make_fake_ffmpeg_service()
+
+    fake_format_selector.select.return_value = FormatSelection(
+        video_format=media.formats[0],
+    )
+
+    # A operação em curso só termina depois que `release_download` é
+    # sinalizado, permitindo observar que `shutdown(wait=True)` de fato
+    # aguarda sua conclusão antes de retornar.
+    release_download = threading.Event()
+
+    def fake_download(*args, **kwargs):
+        release_download.wait(timeout=5.0)
+        return DownloadResult(
+            success=True,
+            file_path=tmp_path / "output.mp4",
+            file_size=123,
+        )
+
+    fake_downloader.download.side_effect = fake_download
+
+    service = DownloadService(
+        downloader=fake_downloader,
+        format_selector=fake_format_selector,
+        ffmpeg_service=fake_ffmpeg_service,
+    )
+
+    completion_event = threading.Event()
+    received_results: list[DownloadResult] = []
+
+    def on_complete(result: DownloadResult) -> None:
+        received_results.append(result)
+        completion_event.set()
+
+    handle = service.start_download(media, options, on_complete=on_complete)
+    assert isinstance(handle, DownloadHandle)
+
+    # Garante que a operação ainda está em curso (não terminou) antes de
+    # chamar shutdown(), para que o teste de fato comprove que
+    # shutdown(wait=True) espera por ela.
+    assert not completion_event.is_set()
+
+    shutdown_thread = threading.Thread(target=service.shutdown)
+    shutdown_thread.start()
+
+    # Dá um pequeno intervalo para `shutdown()` começar a bloquear antes
+    # de liberar a operação em curso, sem depender de um timing exato.
+    shutdown_thread.join(timeout=0.2)
+    assert shutdown_thread.is_alive(), (
+        "Esperava que shutdown(wait=True) estivesse bloqueado aguardando "
+        "a operação em curso, mas retornou antes dela terminar."
+    )
+
+    release_download.set()
+    shutdown_thread.join(timeout=5.0)
+    assert not shutdown_thread.is_alive(), (
+        "shutdown(wait=True) não retornou dentro do timeout após a "
+        "operação em curso ser liberada."
+    )
+
+    assert completion_event.is_set(), (
+        "Esperava que a operação em curso tivesse sido concluída (e "
+        "on_complete entregue) antes de shutdown(wait=True) retornar."
+    )
+    assert len(received_results) == 1
+    assert received_results[0].success is True
+
+    # Após o encerramento, novas submissões não são aceitas: tanto
+    # `analyze` quanto `start_download` delegam a `self._executor.submit`,
+    # que levanta `RuntimeError` em um executor já encerrado.
+    with pytest.raises(RuntimeError):
+        service.analyze("https://example.com/watch?v=sample")
+
+    with pytest.raises(RuntimeError):
+        service.start_download(media, options)

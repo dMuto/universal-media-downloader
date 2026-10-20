@@ -15,9 +15,6 @@ so these tests are expected to fail with `ImportError`.
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
-
-import pytest
 
 from app.gui.history_panel import HistoryPanel
 
@@ -32,12 +29,12 @@ class FakeHistoryEntry:
     """
 
     url: str
-    title: Optional[str]
+    title: str | None
     download_type: str
     status: str
-    file_path: Optional[Path]
+    file_path: Path | None
     timestamp: datetime
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
     @property
     def file_exists(self) -> bool:
@@ -47,10 +44,10 @@ class FakeHistoryEntry:
 class FakeHistoryService:
     """Fake `HistoryService` exposing only `list_entries()`."""
 
-    def __init__(self, entries: List[FakeHistoryEntry]):
+    def __init__(self, entries: list[FakeHistoryEntry]):
         self._entries = list(entries)
 
-    def list_entries(self) -> List[FakeHistoryEntry]:
+    def list_entries(self) -> list[FakeHistoryEntry]:
         return list(self._entries)
 
 
